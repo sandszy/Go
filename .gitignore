@@ -17,3 +17,6 @@ Secrets.xcconfig
 *.HEIC
 *.heic
 Samples/
+
+# KataGo 模型太大，用 Scripts/fetch-katago-model.sh 下载
+*.bin.gz

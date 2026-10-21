@@ -67,16 +67,44 @@ public struct VariationChoice: Identifiable, Equatable, Sendable {
 }
 
 /// 判题在自己的 actor 里跑，搜索时不卡界面。
+/// 有引擎（KataGo）时用引擎，什么题型都能判；没有时用入门判题器，只会吃子、逃子、对杀。
 actor Judge {
-    private let solver: ProblemSolver
-
-    init?(problem: Problem) {
-        guard let solver = ProblemSolver(problem: problem) else { return nil }
-        self.solver = solver
+    private enum Backend {
+        case engine(EngineSolver)
+        case search(ProblemSolver)
     }
 
-    func judge(_ position: Position) -> Verdict { solver.judge(position) }
-    func reply(in position: Position) -> Point? { solver.reply(in: position) }
+    private let backend: Backend
+
+    init?(problem: Problem, engine: (any GoEngine)?) {
+        if let engine, !problem.setup.isEmpty {
+            backend = .engine(EngineSolver(problem: problem, engine: engine))
+        } else if let solver = ProblemSolver(problem: problem) {
+            backend = .search(solver)
+        } else {
+            return nil
+        }
+    }
+
+    /// moves 是从题目开始下的每一手，position 是下完这些以后的局面。
+    func judge(_ moves: [Point?], _ position: Position) async -> Verdict {
+        switch backend {
+        case .engine(let solver): await solver.judge(moves)
+        case .search(let solver): solver.judge(position)
+        }
+    }
+
+    func reply(_ moves: [Point?], _ position: Position) async -> Point? {
+        switch backend {
+        case .engine(let solver): await solver.reply(moves)
+        case .search(let solver): solver.reply(in: position)
+        }
+    }
+
+    /// 轮到孩子下时先让引擎算着，孩子下完就能马上判。
+    func prepare(_ moves: [Point?]) async {
+        if case .engine(let solver) = backend { await solver.prepare(moves) }
+    }
 }
 
 /// 摆题和做题的状态。界面只读这里的属性、调这里的方法。
@@ -118,13 +146,16 @@ public final class ProblemEditorModel {
     public private(set) var uncertainPoints: Set<Point> = []
 
     private var nextAlternateStone: Stone = .black
+    private let engine: (any GoEngine)?
     private var judge: Judge?
     private var verdicts: [Int: Verdict] = [:]
     private var notes: [Int: EditorMessage] = [:]
     private var work: Task<Void, Never>?
 
-    public init(problem: Problem = .sample) {
+    /// engine 为 nil 时只用入门判题器。
+    public init(problem: Problem = .sample, engine: (any GoEngine)? = nil) {
         self.problem = problem
+        self.engine = engine
         tree = GameTree(root: problem.startPosition)
     }
 
@@ -172,10 +203,15 @@ public final class ProblemEditorModel {
     public var canRedo: Bool { mode == .solve && !isThinking && tree.canRedo }
 
     /// 这道题能不能自动判对错。
-    public var canJudge: Bool { Objective.infer(for: problem) != nil }
+    public var canJudge: Bool {
+        engine == nil ? Objective.infer(for: problem) != nil : !problem.setup.isEmpty
+    }
 
     /// 告诉家长判题按什么标准，方便检查自动找的目标对不对。
     public var judgeSummary: String {
+        if engine != nil {
+            return problem.setup.isEmpty ? "摆好题目后，做题时可以自动判对错" : "判题：KataGo 看每一手比最好的下法亏多少"
+        }
         guard let goal = problem.goal else { return "设好题目目标后，做题时可以自动判对错" }
         guard let objective = Objective.infer(for: problem) else {
             switch goal {
@@ -310,10 +346,11 @@ public final class ProblemEditorModel {
     public func restart() {
         cancelWork()
         tree = GameTree(root: problem.startPosition)
-        judge = Judge(problem: problem)
+        judge = Judge(problem: problem, engine: engine)
         verdicts = [:]
         notes = [:]
         afterNavigation()
+        if isJudgeEnabled, let judge { Task { await judge.prepare([]) } }
     }
 
     public func selectVariation(_ id: Int) {
@@ -439,25 +476,24 @@ public final class ProblemEditorModel {
         isThinking = true
         message = nil
         let position = tree.position
+        let moves = self.moves
         let delay = replyDelay
         let player = problem.toPlay
         let opponent = player.opponent.name
-        let goal = problem.goal
 
         work = Task {
-            let verdict = await judge.judge(position)
+            let verdict = await judge.judge(moves, position)
             guard !Task.isCancelled, tree.currentID == node else { return }
             verdicts[node] = verdict
 
             switch verdict {
             case .solved:
                 let captured = position.captures(by: player) - problem.startPosition.captures(by: player)
-                let text = goal == .escape ? "答对了！\(player.name)棋逃出来了" : "答对了！吃掉了 \(captured) 个\(opponent)子"
-                finish(node, EditorMessage(text: text, tone: .success))
+                finish(node, EditorMessage(text: solvedText(captured: captured), tone: .success))
             case .unknown:
                 finish(node, EditorMessage(text: "这一手太复杂，算不出来，可以自己接着下", tone: .info))
             case .correct, .wrong:
-                let reply = await judge.reply(in: position)
+                let reply = await judge.reply(moves, position)
                 if delay > .zero { try? await Task.sleep(for: delay) }
                 guard !Task.isCancelled, tree.currentID == node else { return }
                 if let reply {
@@ -469,6 +505,8 @@ public final class ProblemEditorModel {
                 let text: String
                 if verdict == .correct {
                     text = reply == nil ? "下得好！\(opponent)棋停了一手，接着下" : "下得好！\(opponent)棋应在这里，接着下"
+                    let next = self.moves
+                    Task { await judge.prepare(next) }
                 } else {
                     text = reply == nil ? "不对哦，\(opponent)棋不用应也没事。悔棋再试试" : "不对哦，看\(opponent)棋这样应。悔棋再试试"
                 }
@@ -476,6 +514,27 @@ public final class ProblemEditorModel {
                 notes[node] = note
                 finish(tree.currentID, note)
             }
+        }
+    }
+
+    /// 从题目开始到现在下的每一手，nil 是停一手。
+    private var moves: [Point?] {
+        tree.path.compactMap { tree[$0].move }.map(\.point)
+    }
+
+    private func solvedText(captured: Int) -> String {
+        let me = problem.toPlay.name
+        let opponent = problem.toPlay.opponent.name
+        let capturedText = "吃掉了 \(captured) 个\(opponent)子"
+        switch problem.goal {
+        case .escape: return "答对了！\(me)棋逃出来了"
+        case .live: return "答对了！\(me)棋活了"
+        case .kill: return "答对了！\(opponent)棋死了"
+        case .connect: return "答对了！\(me)棋连上了"
+        case .cut: return "答对了！\(opponent)棋被切断了"
+        case .capture: return captured > 0 ? "答对了！\(capturedText)" : "答对了！\(opponent)子逃不掉了"
+        case .capturingRace: return captured > 0 ? "答对了！\(capturedText)" : "答对了！对杀赢了"
+        case nil: return captured > 0 ? "答对了！\(capturedText)" : "答对了！"
         }
     }
 

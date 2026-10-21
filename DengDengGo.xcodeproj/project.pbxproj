@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		DD0000000000000000000001 /* GoUI in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000020 /* GoUI */; };
+		DD0000000000000000000041 /* libKataGo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000043 /* libKataGo.a */; };
+		DD0000000000000000000042 /* libKataGoSwift.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000044 /* libKataGoSwift.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -18,11 +20,27 @@
 			remoteGlobalIDString = DD0000000000000000000007;
 			remoteInfo = DengDengGo;
 		};
+		DD0000000000000000000045 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DD000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DD0000000000000000000050;
+			remoteInfo = KataGo;
+		};
+		DD0000000000000000000046 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DD000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DD0000000000000000000060;
+			remoteInfo = KataGoSwift;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		DD0000000000000000000002 /* DengDengGo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DengDengGo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD0000000000000000000032 /* DengDengGoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DengDengGoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD0000000000000000000043 /* libKataGo.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libKataGo.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD0000000000000000000044 /* libKataGoSwift.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libKataGoSwift.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -36,6 +54,24 @@
 			path = DengDengGoUITests;
 			sourceTree = "<group>";
 		};
+		DD0000000000000000000047 /* KataGo C++ */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			name = "KataGo C++";
+			path = ThirdParty/KataGo/cpp;
+			sourceTree = "<group>";
+		};
+		DD0000000000000000000048 /* KataGoBridge */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			name = KataGoBridge;
+			path = ThirdParty/KataGoBridge;
+			sourceTree = "<group>";
+		};
+		DD0000000000000000000049 /* KataGo Swift */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			name = "KataGo Swift";
+			path = ThirdParty/KataGo/swift;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -44,10 +80,26 @@
 			buildActionMask = 2147483647;
 			files = (
 				DD0000000000000000000001 /* GoUI in Frameworks */,
+				DD0000000000000000000041 /* libKataGo.a in Frameworks */,
+				DD0000000000000000000042 /* libKataGoSwift.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		DD0000000000000000000034 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0000000000000000000051 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0000000000000000000061 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -62,6 +114,7 @@
 			children = (
 				DD0000000000000000000003 /* DengDengGo */,
 				DD0000000000000000000033 /* DengDengGoUITests */,
+				DD000000000000000000004A /* ThirdParty */,
 				DD0000000000000000000006 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -71,8 +124,20 @@
 			children = (
 				DD0000000000000000000002 /* DengDengGo.app */,
 				DD0000000000000000000032 /* DengDengGoUITests.xctest */,
+				DD0000000000000000000043 /* libKataGo.a */,
+				DD0000000000000000000044 /* libKataGoSwift.a */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		DD000000000000000000004A /* ThirdParty */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000047 /* KataGo C++ */,
+				DD0000000000000000000049 /* KataGo Swift */,
+				DD0000000000000000000048 /* KataGoBridge */,
+			);
+			name = ThirdParty;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -89,6 +154,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				DD0000000000000000000057 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				DD0000000000000000000003 /* DengDengGo */,
@@ -122,6 +188,46 @@
 			productReference = DD0000000000000000000032 /* DengDengGoUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		DD0000000000000000000050 /* KataGo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD0000000000000000000054 /* Build configuration list for PBXNativeTarget "KataGo" */;
+			buildPhases = (
+				DD0000000000000000000052 /* Sources */,
+				DD0000000000000000000051 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DD0000000000000000000058 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				DD0000000000000000000047 /* KataGo C++ */,
+				DD0000000000000000000048 /* KataGoBridge */,
+			);
+			name = KataGo;
+			productName = KataGo;
+			productReference = DD0000000000000000000043 /* libKataGo.a */;
+			productType = "com.apple.product-type.library.static";
+		};
+		DD0000000000000000000060 /* KataGoSwift */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD0000000000000000000064 /* Build configuration list for PBXNativeTarget "KataGoSwift" */;
+			buildPhases = (
+				DD0000000000000000000062 /* Sources */,
+				DD0000000000000000000061 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				DD0000000000000000000049 /* KataGo Swift */,
+			);
+			name = KataGoSwift;
+			productName = KataGoSwift;
+			productReference = DD0000000000000000000044 /* libKataGoSwift.a */;
+			productType = "com.apple.product-type.library.static";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -130,7 +236,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2710;
 				TargetAttributes = {
 					DD0000000000000000000007 = {
 						CreatedOnToolsVersion = 16.0;
@@ -160,6 +266,8 @@
 			targets = (
 				DD0000000000000000000007 /* DengDengGo */,
 				DD0000000000000000000037 /* DengDengGoUITests */,
+				DD0000000000000000000050 /* KataGo */,
+				DD0000000000000000000060 /* KataGoSwift */,
 			);
 		};
 /* End PBXProject section */
@@ -196,6 +304,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DD0000000000000000000052 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0000000000000000000062 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -203,6 +325,16 @@
 			isa = PBXTargetDependency;
 			target = DD0000000000000000000007 /* DengDengGo */;
 			targetProxy = DD0000000000000000000031 /* PBXContainerItemProxy */;
+		};
+		DD0000000000000000000057 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DD0000000000000000000050 /* KataGo */;
+			targetProxy = DD0000000000000000000045 /* PBXContainerItemProxy */;
+		};
+		DD0000000000000000000058 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DD0000000000000000000060 /* KataGoSwift */;
+			targetProxy = DD0000000000000000000046 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -214,20 +346,46 @@
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
 					"$(inherited)",
 				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -240,14 +398,40 @@
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -260,12 +444,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = LQBACR727U;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "登登围棋";
-				INFOPLIST_KEY_NSCameraUsageDescription = "拍下作业纸，把题目摆到棋盘上";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_NSCameraUsageDescription = "拍下作业纸，把题目摆到棋盘上";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -276,11 +460,16 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = (
+					"-lz",
+					"-lc++",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sandszy.dengdenggo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "DengDengGo/Engine/KataGo-Bridging-Header.h";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -293,12 +482,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = LQBACR727U;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "登登围棋";
-				INFOPLIST_KEY_NSCameraUsageDescription = "拍下作业纸，把题目摆到棋盘上";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_NSCameraUsageDescription = "拍下作业纸，把题目摆到棋盘上";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -309,11 +498,16 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = (
+					"-lz",
+					"-lc++",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sandszy.dengdenggo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "DengDengGo/Engine/KataGo-Bridging-Header.h";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -355,6 +549,98 @@
 			};
 			name = Release;
 		};
+		DD0000000000000000000055 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CODE_SIGN_STYLE = Automatic;
+				GCC_OPTIMIZATION_LEVEL = 3;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					USE_METAL_BACKEND,
+					NO_GIT_REVISION,
+				);
+				GCC_WARN_INHIBIT_ALL_WARNINGS = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/ThirdParty/KataGoBridge/include",
+					"$(SRCROOT)/ThirdParty/KataGo/cpp/external",
+					"$(SRCROOT)/ThirdParty/KataGo/cpp/external/tclap-1.2.2/include",
+					"$(SRCROOT)/ThirdParty/KataGo/cpp/external/filesystem-1.5.8/include",
+					"$(CONFIGURATION_TEMP_DIR)/KataGoSwift.build/DerivedSources",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_NAME = KataGo;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DD0000000000000000000056 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CODE_SIGN_STYLE = Automatic;
+				GCC_OPTIMIZATION_LEVEL = 3;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					USE_METAL_BACKEND,
+					NO_GIT_REVISION,
+				);
+				GCC_WARN_INHIBIT_ALL_WARNINGS = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/ThirdParty/KataGoBridge/include",
+					"$(SRCROOT)/ThirdParty/KataGo/cpp/external",
+					"$(SRCROOT)/ThirdParty/KataGo/cpp/external/tclap-1.2.2/include",
+					"$(SRCROOT)/ThirdParty/KataGo/cpp/external/filesystem-1.5.8/include",
+					"$(CONFIGURATION_TEMP_DIR)/KataGoSwift.build/DerivedSources",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_NAME = KataGo;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		DD0000000000000000000065 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_NAME = KataGoSwift;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_INSTALL_OBJC_HEADER = YES;
+				SWIFT_OBJC_INTERFACE_HEADER_NAME = "KataGoSwift-Generated.h";
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DD0000000000000000000066 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_NAME = KataGoSwift;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_INSTALL_OBJC_HEADER = YES;
+				SWIFT_OBJC_INTERFACE_HEADER_NAME = "KataGoSwift-Generated.h";
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -381,6 +667,24 @@
 			buildConfigurations = (
 				DD000000000000000000003E /* Debug */,
 				DD000000000000000000003F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DD0000000000000000000054 /* Build configuration list for PBXNativeTarget "KataGo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DD0000000000000000000055 /* Debug */,
+				DD0000000000000000000056 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DD0000000000000000000064 /* Build configuration list for PBXNativeTarget "KataGoSwift" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DD0000000000000000000065 /* Debug */,
+				DD0000000000000000000066 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
