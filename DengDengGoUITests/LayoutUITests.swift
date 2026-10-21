@@ -56,6 +56,26 @@ final class LayoutUITests: XCTestCase {
         attachScreenshot(named: "竖屏-提示")
     }
 
+    /// 第 7 题：下 E2（左数第 5 列、下数第 2 行）判为答对，白棋自动应一手。
+    @MainActor
+    func testSampleProblemJudgesCorrectAnswer() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["做题"].tap()
+
+        let board = boardElement(in: app)
+        XCTAssertTrue(board.waitForExistence(timeout: 5))
+        let e2 = board.coordinate(withNormalizedOffset: CGVector(dx: 4.75 / 9.5, dy: 5.75 / 7.5))
+        e2.tap()
+        e2.tap()
+
+        let praise = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "下得好")).firstMatch
+        XCTAssertTrue(praise.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["轮到黑棋下"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "横屏-答对")
+    }
+
     @MainActor
     private func boardElement(in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any)

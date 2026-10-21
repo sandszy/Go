@@ -1,0 +1,118 @@
+import GoCore
+import Testing
+@testable import GoUI
+
+/// 用第 7 题检查做题时的自动判题：正解 E2，D2 会被白棋破解。
+@MainActor
+@Suite("做题判对错")
+struct JudgingTests {
+    private let e2 = Point(4, 17)
+    private let d2 = Point(3, 17)
+
+    private func solvingModel() -> ProblemEditorModel {
+        let model = ProblemEditorModel(problem: .sample)
+        model.replyDelay = .zero
+        model.confirmMoves = false
+        model.switchMode(to: .solve)
+        return model
+    }
+
+    @Test("下对了：提示下得好，白棋自动应一手，又轮到黑棋")
+    func correctMove() async {
+        let model = solvingModel()
+        model.tap(e2)
+        await model.waitUntilIdle()
+        #expect(model.message?.tone == .success)
+        #expect(model.tree.path.count == 3)
+        #expect(model.position.toPlay == .black)
+        #expect(!model.isThinking)
+    }
+
+    @Test("下错了：提示不对，白棋应出破解的一手，后面不再判")
+    func wrongMove() async {
+        let model = solvingModel()
+        model.tap(d2)
+        await model.waitUntilIdle()
+        #expect(model.message?.tone == .warning)
+        #expect(model.position.toPlay == .black)
+
+        // 判完以后是自由下：黑白轮流，白棋不再自动应。
+        let before = model.tree.path.count
+        model.tap(Point(0, 18))
+        await model.waitUntilIdle()
+        #expect(model.tree.path.count == before + 1)
+        #expect(model.position.toPlay == .white)
+    }
+
+    @Test("悔棋连同白棋的应手一起退回，再下正解还能判")
+    func undoAfterWrongMove() async {
+        let model = solvingModel()
+        model.tap(d2)
+        await model.waitUntilIdle()
+        model.undo()
+        #expect(model.tree.currentID == GameTree.rootID)
+        #expect(model.message == nil)
+
+        model.tap(e2)
+        await model.waitUntilIdle()
+        #expect(model.message?.tone == .success)
+    }
+
+    @Test("试过两种下法后，棋盘上标 A、B，面板上能来回切换")
+    func variations() async throws {
+        let model = solvingModel()
+        model.tap(d2)
+        await model.waitUntilIdle()
+        model.undo()
+        model.tap(e2)
+        await model.waitUntilIdle()
+
+        let choices = model.variationChoices
+        #expect(choices.map(\.label) == ["变化 A", "变化 B"])
+        #expect(choices.last?.isCurrent == true)
+
+        let first = try #require(choices.first)
+        model.selectVariation(first.id)
+        #expect(model.message?.tone == .warning)
+        #expect(model.position.toPlay == .black)
+
+        model.undo()
+        #expect(model.displayedLabels[d2] == "A")
+        #expect(model.displayedLabels[e2] == "B")
+    }
+
+    @Test("删掉下错的那个变化")
+    func deleteVariation() async {
+        let model = solvingModel()
+        model.tap(d2)
+        await model.waitUntilIdle()
+        model.undo()
+        model.tap(e2)
+        await model.waitUntilIdle()
+        model.selectVariation(model.variationChoices[0].id)
+
+        model.deleteCurrentVariation()
+        #expect(model.tree.currentID == GameTree.rootID)
+        #expect(model.variationChoices.isEmpty)
+        #expect(model.tree.current.children.count == 1)
+    }
+
+    @Test("关掉自动判对错后，黑白轮流自由下")
+    func freePlayWhenJudgingOff() async {
+        let model = solvingModel()
+        model.autoJudge = false
+        model.tap(d2)
+        await model.waitUntilIdle()
+        #expect(model.position.toPlay == .white)
+        #expect(model.message == nil)
+    }
+
+    @Test("摆题时告诉家长判题目标")
+    func judgeSummary() {
+        let model = ProblemEditorModel(problem: .sample)
+        #expect(model.judgeSummary == "判题：吃掉白棋 3 子")
+        model.problem.goal = .live
+        #expect(model.judgeSummary == "做活题暂时不能自动判对错")
+        #expect(!model.canJudge)
+    }
+}

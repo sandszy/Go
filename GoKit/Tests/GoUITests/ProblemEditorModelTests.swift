@@ -100,7 +100,7 @@ struct ProblemEditorModelTests {
         model.switchMode(to: .solve)
         model.confirmMoves = false
         model.tap(Point(1, 1))
-        #expect(model.message == MoveError.suicide.message)
+        #expect(model.message?.text == MoveError.suicide.message)
         #expect(model.position.board[Point(1, 1)] == nil)
     }
 

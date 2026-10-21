@@ -35,6 +35,30 @@ struct ToolIcon: View {
     }
 }
 
+/// 面板顶上的提示条：答对绿色，下错橙色，其他蓝色。
+struct MessageBanner: View {
+    let message: EditorMessage
+
+    private var color: Color {
+        switch message.tone {
+        case .success: .green
+        case .warning: .orange
+        case .info: .blue
+        }
+    }
+
+    var body: some View {
+        Text(message.text)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
 /// 大按钮，孩子容易点中；选中时有边框和底色。
 struct ToolButton<Icon: View>: View {
     let title: String

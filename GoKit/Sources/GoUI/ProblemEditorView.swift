@@ -61,15 +61,14 @@ public struct ProblemEditorView: View {
             .labelsHidden()
 
             // 放在面板最上面：竖屏时面板要滚动，放在下面孩子看不到。
-            if let message = model.message {
-                Text(message)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            if model.isThinking {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("想一想……").font(.title3).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else if let message = model.message {
+                MessageBanner(message: message)
             }
 
             switch model.mode {
@@ -117,6 +116,9 @@ public struct ProblemEditorView: View {
                 }
                 .labelsHidden()
             }
+            Text(model.judgeSummary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
 
             LabeledContent("棋盘") {
                 Picker("棋盘", selection: boardSizeBinding) {
@@ -197,9 +199,16 @@ public struct ProblemEditorView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
 
+            if !model.variationChoices.isEmpty {
+                variationControls
+            }
+
             Text("黑提 \(model.position.blackCaptures) 子 · 白提 \(model.position.whiteCaptures) 子")
                 .foregroundStyle(.secondary)
 
+            if model.canJudge {
+                Toggle("自动判对错", isOn: $model.autoJudge)
+            }
             Toggle("落子前确认", isOn: $model.confirmMoves)
             if model.confirmMoves {
                 Text("点一下看位置，再点一次才落子")
@@ -207,6 +216,35 @@ public struct ProblemEditorView: View {
                     .foregroundStyle(.secondary)
             }
             Toggle("显示全盘", isOn: $model.showWholeBoard)
+        }
+    }
+}
+
+extension ProblemEditorView {
+    /// 同一步试过几种下法时，可以来回切换；字母和棋盘上标的一致。
+    private var variationControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("这一步试过的下法").font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96))], alignment: .leading, spacing: 8) {
+                ForEach(model.variationChoices) { choice in
+                    Button {
+                        model.selectVariation(choice.id)
+                    } label: {
+                        Text(choice.label)
+                            .fontWeight(choice.isCurrent ? .bold : .regular)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(choice.isCurrent ? Color.accentColor : Color.gray)
+                    .accessibilityAddTraits(choice.isCurrent ? .isSelected : [])
+                }
+            }
+            Button(role: .destructive) {
+                model.deleteCurrentVariation()
+            } label: {
+                Label("删掉现在这个变化", systemImage: "trash")
+            }
+            .buttonStyle(.borderless)
         }
     }
 }

@@ -25,6 +25,12 @@ public struct Board: Hashable, Codable, Sendable {
         return p.y * size + p.x
     }
 
+    /// 判题搜索时盘面要反复做哈希，直接对整块内存算，比逐格算快得多。
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(size)
+        cells.withUnsafeBytes { hasher.combine(bytes: $0) }
+    }
+
     public var isEmpty: Bool { cells.allSatisfy { $0 == nil } }
 
     public var allPoints: [Point] {
@@ -66,6 +72,20 @@ public struct Board: Hashable, Codable, Sendable {
 
     /// p 所在那块棋的气。
     public func liberties(at p: Point) -> Set<Point> { liberties(of: group(at: p)) }
+
+    /// 和 group 贴着的某种颜色的块。
+    public func neighborGroups(of group: Set<Point>, color: Stone) -> [Set<Point>] {
+        var seen = Set<Point>()
+        var result: [Set<Point>] = []
+        for q in group {
+            for n in neighbors(of: q) where self[n] == color && !seen.contains(n) {
+                let g = self.group(at: n)
+                seen.formUnion(g)
+                result.append(g)
+            }
+        }
+        return result
+    }
 
     /// 盘面上所有的块。
     public var groups: [Set<Point>] {
