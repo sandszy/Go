@@ -12,3 +12,8 @@ build/
 
 # 本地密钥（DeepSeek Key 等），不要提交
 Secrets.xcconfig
+
+# 作业照片是孩子的作业，不放进仓库。以后的样例照片统一放在 Samples/ 下。
+*.HEIC
+*.heic
+Samples/
