@@ -1,0 +1,14 @@
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# 本地密钥（DeepSeek Key 等），不要提交
+Secrets.xcconfig
