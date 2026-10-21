@@ -31,6 +31,9 @@ struct ToolIcon: View {
         case .erase:
             Image(systemName: "eraser")
                 .font(.system(size: 24))
+        case .cycle:
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 24))
         }
     }
 }

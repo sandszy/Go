@@ -21,6 +21,7 @@ public struct ProblemEditorView: View {
                     lastMove: model.lastMove,
                     ghost: model.ghost,
                     highlighted: model.mode == .setup ? model.stonesWithoutLiberties : [],
+                    uncertain: model.mode == .setup ? model.uncertainPoints : [],
                     showCoordinates: model.showCoordinates,
                     onTap: model.tap
                 )
@@ -49,6 +50,9 @@ public struct ProblemEditorView: View {
         }
         .confirmationDialog("清空棋盘上所有棋子？", isPresented: $model.isConfirmingClear, titleVisibility: .visible) {
             Button("清空", role: .destructive) { model.clearBoard() }
+        }
+        .sheet(isPresented: $model.isChoosingDiagram) {
+            DiagramChooser(model: model)
         }
     }
 
@@ -86,6 +90,8 @@ public struct ProblemEditorView: View {
 
     private var setupControls: some View {
         VStack(alignment: .leading, spacing: 16) {
+            ImportControls(model: model)
+
             TextField("题目名称，比如第 35 页第 7 题", text: $model.problem.title)
                 .textFieldStyle(.roundedBorder)
 
@@ -97,6 +103,13 @@ public struct ProblemEditorView: View {
                         ToolIcon(tool: tool)
                     }
                 }
+            }
+
+            if let reference = model.referenceImage {
+                ReferenceImage(image: reference, hasUncertain: !model.uncertainPoints.isEmpty)
+            }
+            if model.problem.region != nil {
+                Toggle("显示全盘", isOn: $model.showWholeBoard)
             }
 
             LabeledContent("谁先下") {

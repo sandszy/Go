@@ -1,4 +1,6 @@
+import CoreGraphics
 import GoCore
+import GoVision
 import Observation
 
 public enum EditorMode: String, CaseIterable, Identifiable, Sendable {
@@ -22,6 +24,8 @@ public enum SetupTool: String, CaseIterable, Identifiable, Sendable {
     case white
     case alternate
     case erase
+    /// 校对识别结果用：点一下在空、黑、白之间轮换。
+    case cycle
 
     public var id: Self { self }
 
@@ -31,8 +35,15 @@ public enum SetupTool: String, CaseIterable, Identifiable, Sendable {
         case .white: "白子"
         case .alternate: "黑白交替"
         case .erase: "橡皮"
+        case .cycle: "轮换"
         }
     }
+}
+
+/// 拍下来的一页作业和识别结果，一页上可能有好几道题。
+public struct ScannedPage {
+    public let image: CGImage
+    public let page: RecognizedPage
 }
 
 /// 给孩子看的提示，语气决定颜色。
@@ -95,6 +106,17 @@ public final class ProblemEditorModel {
     public var pendingBoardSize: Int?
     public var isConfirmingClear = false
 
+    /// 最近拍的那页作业。做完一道题可以回来选同一页的下一道。
+    public private(set) var scannedPage: ScannedPage?
+    /// 正在识别照片。
+    public private(set) var isRecognizing = false
+    /// 为 true 时界面弹出选题页。
+    public var isChoosingDiagram = false
+    /// 当前这道题在照片里的样子，校对时对照着看。
+    public private(set) var referenceImage: CGImage?
+    /// 识别时没认准的点，校对时用橙色圈提醒。改过的点就不再提醒。
+    public private(set) var uncertainPoints: Set<Point> = []
+
     private var nextAlternateStone: Stone = .black
     private var judge: Judge?
     private var verdicts: [Int: Verdict] = [:]
@@ -113,10 +135,11 @@ public final class ProblemEditorModel {
 
     public var displayedBoard: Board { mode == .setup ? problem.setup : position.board }
 
-    /// 摆题时显示全盘，方便往任何地方放子；做题时默认只显示题目所在的局部。
+    /// 从照片识别的题按作业纸上印的那一块显示；手摆的题摆题时显示全盘，做题时只显示棋子所在的局部。
     public var region: BoardRegion {
-        if mode == .setup || showWholeBoard { return .full(size: problem.setup.size) }
-        return .fitting(problem.setup)
+        if showWholeBoard { return .full(size: problem.setup.size) }
+        if let region = problem.region { return region }
+        return mode == .setup ? .full(size: problem.setup.size) : .fitting(problem.setup)
     }
 
     /// 题目印的字只在原来那颗子还在时显示；做题时，试过几种下法的地方标上 A、B……
@@ -216,12 +239,56 @@ public final class ProblemEditorModel {
     public func changeBoardSize(to size: Int) {
         problem.setup = Board(size: size)
         problem.labels = [:]
+        problem.region = nil
+        uncertainPoints = []
+        referenceImage = nil
         pendingBoardSize = nil
         message = nil
     }
 
     public func clearBoard() {
         changeBoardSize(to: problem.setup.size)
+    }
+
+    /// 识别一页作业照片。只有一道题就直接导入，有好几道就弹出选题页。
+    public func importPhoto(_ image: CGImage) async {
+        isRecognizing = true
+        message = nil
+        let page = await Task.detached(priority: .userInitiated) {
+            try? PageRecognizer.recognize(image)
+        }.value
+        isRecognizing = false
+        guard let page else {
+            message = EditorMessage(text: "照片读不出来，换一张试试", tone: .warning)
+            return
+        }
+        show(page, from: image)
+    }
+
+    /// 显示识别结果。和识别分开，方便测试。
+    public func show(_ page: RecognizedPage, from image: CGImage) {
+        guard !page.diagrams.isEmpty else {
+            message = EditorMessage(text: "没找到棋盘图。换个角度、拍正一点再试，或者直接手动摆题", tone: .warning)
+            return
+        }
+        scannedPage = ScannedPage(image: image, page: page)
+        if page.diagrams.count == 1 {
+            loadDiagram(page.diagrams[0].id)
+        } else {
+            isChoosingDiagram = true
+        }
+    }
+
+    /// 把选中的那道题放到棋盘上，进入摆题模式校对。
+    public func loadDiagram(_ id: Int) {
+        guard let scanned = scannedPage, let diagram = scanned.page.diagrams.first(where: { $0.id == id }) else { return }
+        switchMode(to: .setup)
+        problem = scanned.page.problem(for: diagram)
+        referenceImage = PhotoLoader.crop(scanned.image, to: diagram.bounds)
+        uncertainPoints = Set(diagram.uncertain.map(diagram.boardPoint))
+        tool = .cycle
+        isChoosingDiagram = false
+        message = EditorMessage(text: "对照原图检查一下棋子，摆错的地方点一下就能改", tone: .info)
     }
 
     /// 判题时，App 替对方下的那手跟着一起退回，回到孩子自己的回合。
@@ -321,8 +388,15 @@ public final class ProblemEditorModel {
             }
         case .erase:
             problem.setup[p] = nil
+        case .cycle:
+            switch current {
+            case nil: problem.setup[p] = .black
+            case .black?: problem.setup[p] = .white
+            case .white?: problem.setup[p] = nil
+            }
         }
         problem.labels[p] = nil
+        uncertainPoints.remove(p)
         message = nil
     }
 

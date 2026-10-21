@@ -33,13 +33,18 @@ final class CaptureSearch {
         var lossDepth = -1
     }
 
+    /// 每次调用最多算这么久，超过就算"算不出来"。不同设备快慢不一样，光限制节点数不够。
+    let timeLimit: Duration
+
     private var table: [Key: Bound] = [:]
     private var exhausted = false
+    private var deadline = ContinuousClock.now
 
-    init(objective: Objective, maxDepth: Int, nodeLimit: Int) {
+    init(objective: Objective, maxDepth: Int, nodeLimit: Int, timeLimit: Duration = .seconds(2)) {
         self.objective = objective
         self.maxDepth = maxDepth
         self.nodeLimit = nodeLimit
+        self.timeLimit = timeLimit
     }
 
     func outcome(_ position: Position) -> Outcome {
@@ -63,6 +68,7 @@ final class CaptureSearch {
         }
         nodes = 0
         exhausted = false
+        deadline = ContinuousClock.now + timeLimit
         for depth in 1...maxDepth {
             let wins = attackerWins(position, depth: depth)
             if exhausted { return .unknown }
@@ -132,7 +138,8 @@ final class CaptureSearch {
             if depth <= bound.lossDepth { return false }
         }
         nodes += 1
-        if nodes > nodeLimit {
+        // 看钟有开销，每 256 个节点看一次。
+        if nodes > nodeLimit || (nodes % 256 == 0 && ContinuousClock.now > deadline) {
             exhausted = true
             return false
         }

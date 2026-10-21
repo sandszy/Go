@@ -16,7 +16,7 @@ public final class ProblemSolver {
     private let search: CaptureSearch
 
     /// maxDepth 是双方合计的手数，不传时对杀搜 12 手、吃子和逃子搜 16 手（征子要多几手）。
-    public init?(problem: Problem, maxDepth: Int? = nil, nodeLimit: Int = 100_000) {
+    public init?(problem: Problem, maxDepth: Int? = nil, nodeLimit: Int = 30_000) {
         guard let objective = Objective.infer(for: problem) else { return nil }
         self.objective = objective
         let depth = maxDepth ?? (objective.guards.isEmpty ? 16 : 12)
@@ -50,9 +50,16 @@ public final class ProblemSolver {
     /// 轮到对方时，替对方选一手。返回 nil 表示停一手。
     /// 做题一方下对了，就选最顽强的抵抗；下错了，就选能让做题一方失败的那手，让孩子看到后果。
     public func reply(in position: Position) -> Point? {
-        let moves = search.candidates(position).compactMap { move -> (Point, CaptureSearch.Result)? in
-            guard let next = try? position.playing(move) else { return nil }
-            return (move, search.result(next.position))
+        // 每个候选都要单独算一遍，候选多时加起来很久；总共最多算 3 秒，到时就用已经算过的那些里最好的。
+        let deadline = ContinuousClock.now + .seconds(3)
+        var moves: [(Point, CaptureSearch.Result)] = []
+        for move in search.candidates(position) {
+            guard ContinuousClock.now < deadline || moves.isEmpty else { break }
+            guard let next = try? position.playing(move) else { continue }
+            let result = search.result(next.position)
+            moves.append((move, result))
+            // 守方找到吃不掉的应法、吃子方找到能吃掉的下法，就不用再算别的了。
+            if position.toPlay == objective.defender && result == .fails { break }
         }
         if position.toPlay == objective.defender {
             // 守方：有吃不掉的应法就下那手；都会被吃，就选拖得最久的。

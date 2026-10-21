@@ -22,6 +22,8 @@ public struct BoardView: View {
     public var ghost: GhostStone?
     /// 用红圈标出的棋子，比如摆题时没有气的子。
     public var highlighted: Set<Point>
+    /// 用橙色虚线圈标出的点，比如识别照片时没认准的地方。
+    public var uncertain: Set<Point>
     public var showCoordinates: Bool
     public var onTap: ((Point) -> Void)?
 
@@ -32,6 +34,7 @@ public struct BoardView: View {
         lastMove: Point? = nil,
         ghost: GhostStone? = nil,
         highlighted: Set<Point> = [],
+        uncertain: Set<Point> = [],
         showCoordinates: Bool = false,
         onTap: ((Point) -> Void)? = nil
     ) {
@@ -41,6 +44,7 @@ public struct BoardView: View {
         self.lastMove = lastMove
         self.ghost = ghost
         self.highlighted = highlighted
+        self.uncertain = uncertain
         self.showCoordinates = showCoordinates
         self.onTap = onTap
     }
@@ -178,6 +182,11 @@ public struct BoardView: View {
             let c = g.position(of: p)
             let ring = Path(ellipseIn: CGRect(x: c.x - r * 1.05, y: c.y - r * 1.05, width: r * 2.1, height: r * 2.1))
             context.stroke(ring, with: .color(.red), lineWidth: r * 0.14)
+        }
+        for p in uncertain where region.contains(p) {
+            let c = g.position(of: p)
+            let ring = Path(ellipseIn: CGRect(x: c.x - r * 1.05, y: c.y - r * 1.05, width: r * 2.1, height: r * 2.1))
+            context.stroke(ring, with: .color(.orange), style: StrokeStyle(lineWidth: r * 0.14, dash: [r * 0.3, r * 0.2]))
         }
     }
 }

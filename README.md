@@ -6,7 +6,8 @@
 
 - `DengDengGo.xcodeproj`、`DengDengGo/`：iOS App 外壳，只有入口和资源。
 - `GoKit/`：Swift 包，主要代码都在这里。
-  - `GoCore`：规则引擎（提子、禁入点、打劫）和题目模型，纯 Swift。
+  - `GoCore`：规则引擎（提子、禁入点、打劫）、题目模型、变化树和入门题判题，纯 Swift。
+  - `GoVision`：从照片识别印刷习题：找棋盘图、认黑白子、读“黑先”、题型、题号和页码。
   - `GoUI`：棋盘和摆题、做题界面，iOS 和 macOS 都能编译。
   - `board-snapshot`：把棋盘渲染成 PNG，没有模拟器时检查画面用。
 
@@ -32,6 +33,8 @@ cd GoKit && swift test
 ```bash
 cd GoKit && swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 ```
+
+识别测试有两部分：一部分用程序画的棋谱图，随时能跑；另一部分读真实的作业照片。照片是孩子的作业，不进仓库（见 `.gitignore`），放在仓库根目录的 `棋盘照片样例.HEIC` 或 `Samples/` 下时才会测。
 
 界面布局的 UI 测试（横屏、竖屏、提示位置）在 iPad 模拟器上跑，截图会存进测试结果：
 

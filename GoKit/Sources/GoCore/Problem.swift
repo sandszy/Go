@@ -34,6 +34,8 @@ public struct Problem: Identifiable, Hashable, Codable, Sendable {
     public var goal: ProblemGoal?
     /// 印在交叉点上的文字，比如印刷题里白子上的"1"。
     public var labels: [Point: String]
+    /// 题目印出来的那一块。从照片识别的题目有这个，显示时和作业纸一样；没有时按棋子位置自动算。
+    public var region: BoardRegion?
 
     public init(
         id: UUID = UUID(),
@@ -41,7 +43,8 @@ public struct Problem: Identifiable, Hashable, Codable, Sendable {
         setup: Board = Board(size: 19),
         toPlay: Stone = .black,
         goal: ProblemGoal? = nil,
-        labels: [Point: String] = [:]
+        labels: [Point: String] = [:],
+        region: BoardRegion? = nil
     ) {
         self.id = id
         self.title = title
@@ -49,6 +52,7 @@ public struct Problem: Identifiable, Hashable, Codable, Sendable {
         self.toPlay = toPlay
         self.goal = goal
         self.labels = labels
+        self.region = region
     }
 
     public var startPosition: Position { Position(board: setup, toPlay: toPlay) }
