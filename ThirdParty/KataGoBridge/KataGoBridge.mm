@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "../KataGo/cpp/main.h"
+#include "KataGoBackend.h"
 
 namespace {
 
@@ -87,15 +88,24 @@ std::once_flag started;
 
 @implementation KataGoBridge
 
-+ (void)startWithConfig:(NSString*)configPath model:(NSString*)modelPath onLine:(void (^)(NSString*))handler {
++ (void)startWithConfig:(NSString*)configPath
+                  model:(NSString*)modelPath
+                 useGPU:(BOOL)useGPU
+              overrides:(NSString*)overrides
+                 onLine:(void (^)(NSString*))handler {
   std::call_once(started, [&] {
     outputBuf.handler = [handler copy];
     std::cin.rdbuf(&inputBuf);
     std::cout.rdbuf(&outputBuf);
+    KataGoBackend::setUseGPU(useGPU);
 
     std::vector<std::string> args = {
       "katago", "-config", configPath.UTF8String, "-model", modelPath.UTF8String,
     };
+    if(overrides.length > 0) {
+      args.push_back("-override-config");
+      args.push_back(overrides.UTF8String);
+    }
     // KataGo 的搜索递归比较深，默认 512KB 的线程栈不够用。
     NSThread* thread = [[NSThread alloc] initWithBlock:^{
       MainCmds::analysis(args);

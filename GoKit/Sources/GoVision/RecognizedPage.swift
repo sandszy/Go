@@ -39,6 +39,8 @@ public struct RecognizedDiagram: Identifiable, Sendable {
     public var labels: [GridPoint: String]
     /// 认不准的交叉点，校对时提醒看一眼。
     public var uncertain: Set<GridPoint>
+    /// 比同一页别的图小一圈，多半有一部分没拍进来（在照片边上、被反光或弯曲的书页挡住）。
+    public var isIncomplete = false
     /// 中间有墨迹的白子在原照片里的位置，用来单独读上面的数字。
     var markedStones: [GridPoint: CGPoint] = [:]
     /// 其中墨迹像"1"的那些，文字识别读不出来时当作"1"。
@@ -137,6 +139,13 @@ public struct RecognizedPage: Sendable {
         self.toPlay = toPlay
         self.goal = goal
         self.pageNumber = pageNumber
+    }
+
+    /// 题号中间断开的那些：这几道题照片上有，但没认出来（反光、阴影、没拍全）。
+    public var missingNumbers: [Int] {
+        let numbers = Set(diagrams.compactMap(\.number))
+        guard let low = numbers.min(), let high = numbers.max(), high - low < 30 else { return [] }
+        return (low...high).filter { !numbers.contains($0) }
     }
 
     /// "第 35 页第 7 题"，缺哪部分就省掉哪部分。

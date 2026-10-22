@@ -27,8 +27,14 @@ enum StoneClassifier {
             return Reading(stone: nil, uncertain: suspicious)
         }
 
-        if ringFraction(at: center, s: s, ink: ink) >= 0.55 {
+        let ring = ringFraction(at: center, s: s, ink: ink)
+        if ring >= 0.55 {
             return Reading(stone: .white, uncertain: suspicious, marked: fill >= 0.04)
+        }
+        // 一条线都没穿过中心，空点不会这样，只能是被白子盖住了。印得淡、或者网格和交叉点有点偏差时，
+        // 轮廓只碰到一部分，有三成就算白子，但要提醒校对。
+        if !(left || right || up || down) && ring >= 0.3 {
+            return Reading(stone: .white, uncertain: true, marked: fill >= 0.04)
         }
         return Reading(stone: nil, uncertain: true)
     }
@@ -45,14 +51,18 @@ enum StoneClassifier {
         return total == 0 ? 0 : Double(inked) / Double(total)
     }
 
-    /// 从 0.18 到 0.40 个线距取 6 个点，至少 4 个点附近（垂直方向 ±2 像素内）有墨迹就算有线。
+    /// 从 0.18 到 0.40 个线距取 6 个点，至少 4 个点附近（垂直方向 ±2 像素内）有细的墨迹就算有线。
+    /// 要"细"：再往两边 0.15 个线距都是纸。照片里的网格和实际交叉点有一点偏差时，伸出去的短线段
+    /// 会碰到旁边黑子的边，黑子是一大片墨，不算线；不然夹在黑子中间的白子会被当成空点。
     private static func armInked(_ c: (x: Double, y: Double), dx: Double, dy: Double, s: Double, ink: InkMask) -> Bool {
+        let side = max(4, Int((s * 0.15).rounded()))
         var hits = 0
         for i in 0..<6 {
             let t = s * (0.18 + 0.044 * Double(i))
             let x = Int((c.x + dx * t).rounded()), y = Int((c.y + dy * t).rounded())
+            func inked(_ offset: Int) -> Bool { dx != 0 ? ink[x, y + offset] : ink[x + offset, y] }
             let found = (-2...2).contains { offset in
-                dx != 0 ? ink[x, y + offset] : ink[x + offset, y]
+                inked(offset) && !inked(offset - side) && !inked(offset + side)
             }
             if found { hits += 1 }
         }

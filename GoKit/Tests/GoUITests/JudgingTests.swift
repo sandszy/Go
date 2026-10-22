@@ -116,3 +116,23 @@ struct JudgingTests {
         #expect(!model.canJudge)
     }
 }
+
+/// 有引擎时，摆题页上写明用的是哪个引擎，家长能看出 KataGo 在 GPU 还是 CPU 上跑。
+@MainActor
+@Suite("判题引擎")
+struct EngineJudgingTests {
+    private struct NamedEngine: GoEngine {
+        let name = "KataGo（CPU）"
+        func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis { throw .unavailable("测试") }
+    }
+
+    @Test("判题说明里有引擎的名字，没设题目目标也能判")
+    func summaryNamesEngine() {
+        var problem = Problem.sample
+        problem.goal = nil
+        let model = ProblemEditorModel(problem: problem, engine: NamedEngine())
+        #expect(model.canJudge)
+        #expect(model.judgeSummary.contains("KataGo（CPU）"))
+        #expect(!ProblemEditorModel(problem: problem).canJudge)
+    }
+}

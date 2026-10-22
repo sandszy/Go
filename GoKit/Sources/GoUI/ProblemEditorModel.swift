@@ -209,8 +209,8 @@ public final class ProblemEditorModel {
 
     /// 告诉家长判题按什么标准，方便检查自动找的目标对不对。
     public var judgeSummary: String {
-        if engine != nil {
-            return problem.setup.isEmpty ? "摆好题目后，做题时可以自动判对错" : "判题：KataGo 看每一手比最好的下法亏多少"
+        if let engine {
+            return problem.setup.isEmpty ? "摆好题目后，做题时可以自动判对错" : "判题：\(engine.name) 看每一手比最好的下法亏多少"
         }
         guard let goal = problem.goal else { return "设好题目目标后，做题时可以自动判对错" }
         guard let objective = Objective.infer(for: problem) else {
@@ -324,7 +324,11 @@ public final class ProblemEditorModel {
         uncertainPoints = Set(diagram.uncertain.map(diagram.boardPoint))
         tool = .cycle
         isChoosingDiagram = false
-        message = EditorMessage(text: "对照原图检查一下棋子，摆错的地方点一下就能改", tone: .info)
+        if diagram.isIncomplete {
+            message = EditorMessage(text: "这道题好像没拍全，缺的部分要照着书补上，或者重拍一张", tone: .warning)
+        } else {
+            message = EditorMessage(text: "对照原图检查一下棋子，摆错的地方点一下就能改", tone: .info)
+        }
     }
 
     /// 判题时，App 替对方下的那手跟着一起退回，回到孩子自己的回合。

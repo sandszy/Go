@@ -18,8 +18,10 @@ public struct TsumegoFrame: Sendable {
         let area = Self.area(for: problem)
         let unframed = (board: setup, area: BoardRegion.full(size: size), komi: 6.5)
 
+        let wall = Self.wallColor(for: problem)
+        let sides = Self.sideColors(for: problem, area: area)
         guard size >= 13, area.width * area.height * 2 <= size * size,
-              let fill = Self.fill(setup: setup, area: area, wall: Self.wallColor(for: problem))
+              let fill = Self.fill(setup: setup, area: area, sides: sides) ?? Self.fill(setup: setup, area: area, wall: wall)
         else {
             (board, self.area, komi) = unframed
             return
@@ -27,6 +29,16 @@ public struct TsumegoFrame: Sendable {
         board = fill.board
         self.area = area
         komi = fill.komi
+    }
+
+    /// 题目区域里离所有棋子都超过 distance 路的空点。
+    /// 外框两种颜色交界的地方会空出一片，引擎觉得去那里占地比做题划算；搜索时让双方都不下这些点。
+    /// 按当前局面算，逃子时棋子往外走，能下的范围也跟着走。
+    public func distantPoints(on board: Board, distance: Int = 2) -> [Point] {
+        let stones = area.points.filter { board[$0] != nil }
+        return area.points.filter { p in
+            board[p] == nil && !stones.contains { max(abs($0.x - p.x), abs($0.y - p.y)) <= distance }
+        }
     }
 
     /// 题目区域：印出来的那一块，再保证每个子外面至少还有两路空地。
@@ -46,7 +58,7 @@ public struct TsumegoFrame: Sendable {
     /// 子跑到区域边上就和这种颜色的外框连上了，所以要看谁"跑出去"算成功：
     /// 逃子题是做题方，吃子题是被吃的一方，做活题是杀棋方（活棋要在里面做眼），杀棋题是做题方。
     /// 对杀等其他题看哪方的子离棋盘边更远：在外面包围的一方子更靠中间（KaTrain、Lizgoban 的死活外框也这样猜）。
-    static func wallColor(for problem: Problem) -> Stone {
+    public static func wallColor(for problem: Problem) -> Stone {
         let me = problem.toPlay
         switch problem.goal {
         case .escape: return me
@@ -64,6 +76,80 @@ public struct TsumegoFrame: Sendable {
             if balance == 0 { return me.opponent }
             return balance > 0 ? .black : .white
         }
+    }
+
+    /// 区域的一条边。
+    enum Side: CaseIterable {
+        case top, bottom, left, right
+    }
+
+    /// 对杀、连接、切断和没设目标的题，外框每条边各用离那条边最近的子的颜色：
+    /// 题目上边是黑子、右边是白子时，上边摆黑框、右边摆白框，两边在外面的子都算活的，只剩题目里的对杀。
+    /// 整个外框只用一种颜色的话，另一方在外面的子会被外框围住，引擎就去救它们，不管题目了。
+    /// 各边颜色都一样时返回 nil，按 wallColor 摆。吃子、逃子、做活、杀棋题看题目要谁跑出去，也返回 nil。
+    static func sideColors(for problem: Problem, area: BoardRegion) -> [Side: Stone]? {
+        switch problem.goal {
+        case .capture, .escape, .live, .kill: return nil
+        case .capturingRace, .connect, .cut, nil: break
+        }
+        let setup = problem.setup
+        let last = setup.size - 1
+        let fallback = wallColor(for: problem)
+        var colors: [Side: Stone] = [:]
+        for side in Side.allCases {
+            func distance(_ p: Point) -> Int {
+                switch side {
+                case .top: p.y - area.minY
+                case .bottom: area.maxY - p.y
+                case .left: p.x - area.minX
+                case .right: area.maxX - p.x
+                }
+            }
+            let open = switch side {
+            case .top: area.minY > 0
+            case .bottom: area.maxY < last
+            case .left: area.minX > 0
+            case .right: area.maxX < last
+            }
+            guard open else { continue }
+            // 离这条边最近的一两排子里，哪种颜色多。
+            let stones = setup.occupiedPoints
+            guard let nearest = stones.map(distance).min() else { continue }
+            let near = stones.filter { distance($0) <= nearest + 1 }
+            let black = near.filter { setup[$0] == .black }.count
+            let white = near.count - black
+            colors[side] = black == white ? fallback : (black > white ? .black : .white)
+        }
+        return Set(colors.values).count > 1 ? colors : nil
+    }
+
+    /// 区域外的点属于哪条边外面。区域斜对角外面的点算上下边的。
+    static func side(of p: Point, outside area: BoardRegion) -> Side {
+        if p.y < area.minY { return .top }
+        if p.y > area.maxY { return .bottom }
+        return p.x < area.minX ? .left : .right
+    }
+
+    /// 每条边外面整片用那条边的颜色。哪块活不了就返回 nil。
+    private static func fill(setup: Board, area: BoardRegion, sides: [Side: Stone]?) -> (board: Board, komi: Double)? {
+        guard let sides else { return nil }
+        let outside = setup.allPoints.filter { !area.contains($0) }
+        var board = setup
+        for p in outside {
+            guard let color = sides[side(of: p, outside: area)] else { return nil }
+            board[p] = color
+        }
+        return finish(board, frame: Set(outside))
+    }
+
+    /// 撒上眼位；外框的每一块都有两只眼才算摆好。贴目让两边外框的目数（眼）相当。
+    private static func finish(_ filled: Board, frame: Set<Point>) -> (board: Board, komi: Double)? {
+        var board = filled
+        let eyes = eyePoints(on: board, frame: frame)
+        guard everyGroupLives(on: board, frame: frame, eyes: eyes) else { return nil }
+        let blackEyes = eyes.filter { board[$0] == .black }.count
+        for p in eyes { board[p] = nil }
+        return (board, Double(blackEyes * 2 - eyes.count) + 0.5)
     }
 
     /// 区域外按离区域的远近分两圈：近的一圈是 wall 色，远的是另一色，每块都留出足够的眼。
@@ -92,11 +178,7 @@ public struct TsumegoFrame: Sendable {
             for p in outside {
                 board[p] = distance[p]! <= threshold ? wall : wall.opponent
             }
-            let eyes = eyePoints(on: board, frame: frame)
-            guard everyGroupLives(on: board, frame: frame, eyes: eyes) else { continue }
-            let blackEyes = eyes.filter { board[$0] == .black }.count
-            for p in eyes { board[p] = nil }
-            return (board, Double(blackEyes * 2 - eyes.count) + 0.5)
+            if let result = finish(board, frame: frame) { return result }
         }
         return nil
     }

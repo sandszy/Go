@@ -45,7 +45,7 @@ enum GridDetector {
         let shortHorizontal = ink.thinHorizontalRuns(minLength: max(8, width / 120), gap: gap)
         let shortVertical = ink.thinVerticalRuns(minLength: max(8, width / 120), gap: gap)
 
-        return lineClusters(longLines).compactMap { box in
+        return lineClusters(longLines, ink: ink).compactMap { box in
             fitGrid(in: box, ink: ink, horizontal: shortHorizontal, vertical: shortVertical)
         }
     }
@@ -56,7 +56,9 @@ enum GridDetector {
     typealias Box = (minX: Int, minY: Int, maxX: Int, maxY: Int)
 
     /// 把长直线按位置聚成一团一团，每团的外框可能是一个棋盘图。碰到照片边上的（隔壁页露出来的半个图）不要。
-    static func lineClusters(_ lines: InkMask) -> [Box] {
+    /// 棋子摆得密时，被棋子挡住的那几行几列露不出长直线，外框只框住了一部分；给了 ink 时，
+    /// 再顺着连在一起的墨迹（棋子都压在线上，整个棋盘图是连成一片的）把外框撑到整个图。
+    static func lineClusters(_ lines: InkMask, ink: InkMask? = nil) -> [Box] {
         let cell = max(4, lines.width / 250)
         // 隔大约半个线距也算连着：横线之间隔一个线距，棋子又会把竖线挡断。
         let reach = max(2, lines.width / 60 / cell)
@@ -95,10 +97,54 @@ enum GridDetector {
 
         let minSize = lines.width / 10
         let margin = cell * 2
+        if let ink {
+            // 只撑大起码有半个图大的团，零碎的线段（文字、页边）不管。
+            boxes = mergeOverlapping(boxes).map { box in
+                box.maxX - box.minX >= minSize / 2 && box.maxY - box.minY >= minSize / 2 ? grow(box, along: ink) : box
+            }
+        }
         return mergeOverlapping(boxes).filter { box in
             let touchesEdge = box.minX < margin || box.minY < margin || box.maxX > lines.width - margin || box.maxY > lines.height - margin
             return box.maxX - box.minX >= minSize && box.maxY - box.minY >= minSize && !touchesEdge
         }
+    }
+
+    /// 从框里的墨迹出发，把连着的墨迹都找出来，返回它们的外框。每边最多往外撑原来那么大，
+    /// 免得顺着阴影、页边一路连出去；撑到了上限的那边说明连出去了，那边保持原样。
+    static func grow(_ box: Box, along ink: InkMask) -> Box {
+        let limitX = box.maxX - box.minX, limitY = box.maxY - box.minY
+        let limit: Box = (max(0, box.minX - limitX), max(0, box.minY - limitY),
+                          min(ink.width - 1, box.maxX + limitX), min(ink.height - 1, box.maxY + limitY))
+        let width = limit.maxX - limit.minX + 1
+        var seen = [Bool](repeating: false, count: width * (limit.maxY - limit.minY + 1))
+        var stack: [(Int, Int)] = []
+        for y in box.minY...box.maxY {
+            for x in box.minX...box.maxX where ink[x, y] {
+                seen[(y - limit.minY) * width + (x - limit.minX)] = true
+                stack.append((x, y))
+            }
+        }
+        var found = box
+        while let (x, y) = stack.popLast() {
+            found = (min(found.minX, x), min(found.minY, y), max(found.maxX, x), max(found.maxY, y))
+            for dy in -1...1 {
+                for dx in -1...1 {
+                    let nx = x + dx, ny = y + dy
+                    guard nx >= limit.minX, ny >= limit.minY, nx <= limit.maxX, ny <= limit.maxY, ink[nx, ny] else { continue }
+                    let index = (ny - limit.minY) * width + (nx - limit.minX)
+                    if !seen[index] {
+                        seen[index] = true
+                        stack.append((nx, ny))
+                    }
+                }
+            }
+        }
+        return (
+            found.minX <= limit.minX && limit.minX > 0 ? box.minX : found.minX,
+            found.minY <= limit.minY && limit.minY > 0 ? box.minY : found.minY,
+            found.maxX >= limit.maxX && limit.maxX < ink.width - 1 ? box.maxX : found.maxX,
+            found.maxY >= limit.maxY && limit.maxY < ink.height - 1 ? box.maxY : found.maxY
+        )
     }
 
     /// 同一个棋盘图被拆成了几块时，它们的外框会重叠，合成一个。
@@ -150,8 +196,8 @@ enum GridDetector {
 
         let spacing = estimateSpacing(rowPeaks, columnPeaks)
         guard spacing > 6 else { return nil }
-        let rows = regularize(rowPeaks, spacing: spacing)
-        let columns = regularize(columnPeaks, spacing: spacing)
+        let rows = extend(regularize(rowPeaks, spacing: spacing), to: yRange, spacing: spacing)
+        let columns = extend(regularize(columnPeaks, spacing: spacing), to: xRange, spacing: spacing)
         guard rows.count >= 5, columns.count >= 5 else { return nil }
 
         // 峰值是拉直后的位置，换回原图上的斜线：v = 位置 + 斜率 × (t - 中心)。
@@ -230,6 +276,22 @@ enum GridDetector {
         return result
     }
 
+    /// 外框里两头还放得下线，就按线距补上：那几行（列）被棋子挡满了，没有露出线来。
+    /// 压在最外面那条线上的棋子会让外框比线多出约半个线距，所以要再往里留出 0.2 个线距才补。
+    static func extend(_ lines: [Double], to range: ClosedRange<Double>, spacing: Double) -> [Double] {
+        guard var first = lines.first, var last = lines.last else { return lines }
+        var result = lines
+        while first - spacing >= range.lowerBound + spacing * 0.2 {
+            first -= spacing
+            result.insert(first, at: 0)
+        }
+        while last + spacing <= range.upperBound - spacing * 0.2 {
+            last += spacing
+            result.append(last)
+        }
+        return result
+    }
+
     /// 照片拍歪时，直接按行统计会把峰值抹平。书页弯曲、透视还会让同一个图里各条线斜得不一样。
     /// 所以试一遍"基本斜率 + 斜率随位置的变化"，按每组参数把线拉直后统计，峰值最尖（平方和最大）的那组就是。
     /// 返回拉直后的统计，以及每条线的斜率怎么算。
@@ -241,7 +303,7 @@ enum GridDetector {
         let length = Int(range.upperBound - range.lowerBound) + 1
         let middle = (range.lowerBound + range.upperBound) / 2
         var best: (counts: [Double], base: Double, change: Double, score: Double) = ([], 0, 0, -1)
-        for step in -14...14 {
+        for step in -24...24 {
             let base = Double(step) * 0.005
             for changeStep in -5...5 {
                 let change = Double(changeStep) * 0.00003

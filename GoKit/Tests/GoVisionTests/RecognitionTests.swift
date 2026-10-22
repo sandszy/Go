@@ -144,15 +144,24 @@ struct RecognitionTests {
     }
 }
 
-/// 样例照片不进仓库（是孩子的作业），本机有的时候才测。
-private let samplePhoto: URL? = {
-    let root = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    let candidates = [root.appendingPathComponent("棋盘照片样例.HEIC")]
-        + ((try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("Samples"), includingPropertiesForKeys: nil)) ?? [])
-    return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
-}()
+/// 样例照片不进仓库（是孩子的作业），本机有的时候才测。放在仓库根目录的“棋盘照片样例”或 Samples 文件夹里。
+private let sampleFolder: URL = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
+private let samplePhotos: [URL] = ["棋盘照片样例", "Samples"].flatMap { name in
+    let folder = sampleFolder.appendingPathComponent(name)
+    let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+    return files.filter { ["heic", "jpg", "jpeg", "png"].contains($0.pathExtension.lowercased()) }
+}.sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+/// 读照片的测试排着一个一个跑：好几个同时用系统的文字识别时，swift test 会卡住不动。
+@Suite("照片", .serialized)
+struct PhotoSuites {}
+
+/// 第 35 页那张，下面的测试按它的内容写了具体的期望。
+private let samplePhoto: URL? = samplePhotos.first { $0.lastPathComponent == "棋盘照片样例.HEIC" }
+
+extension PhotoSuites {
 @Suite("样例照片", .enabled(if: samplePhoto != nil, "本机没有样例照片"))
 struct SamplePhotoTests {
     @Test("第 35 页：6 道对杀题，黑先，第 7 题和手抄的一样")
@@ -160,7 +169,7 @@ struct SamplePhotoTests {
         let image = try #require(PhotoLoader.image(at: samplePhoto!))
         let page = try PageRecognizer.recognize(image)
         for found in page.diagrams {
-            print("第 \(found.number.map(String.init) ?? "?") 题 \(found.columns)×\(found.rows) 边 \(found.edges.rawValue) 不确定 \(found.uncertain.count) 数字 \(found.labels.map { "(\($0.key.column),\($0.key.row))=\($0.value)" })")
+            print("第 \(found.number.map(String.init) ?? "?") 题\(found.isIncomplete ? "（没拍全）" : "") \(found.columns)×\(found.rows) 边 \(found.edges.rawValue) 不确定 \(found.uncertain.count) 数字 \(found.labels.map { "(\($0.key.column),\($0.key.row))=\($0.value)" })")
             print(diagram(found).joined(separator: "\n"))
         }
 
@@ -177,5 +186,100 @@ struct SamplePhotoTests {
         #expect(problem.title == "第 35 页第 7 题")
         #expect(problem.setup == Problem.sample.setup)
         #expect(problem.labels[Point(6, 17)] == "1")
+    }
+}
+}
+
+/// 把每张样例照片的识别结果打印出来，人工对照照片检查。新照片放进去就会跑。
+extension PhotoSuites {
+@Suite("所有样例照片", .enabled(if: !samplePhotos.isEmpty, "本机没有样例照片"))
+struct AllSamplePhotosTests {
+    @Test("识别每张照片", arguments: samplePhotos)
+    func survey(_ url: URL) throws {
+        let image = try #require(PhotoLoader.image(at: url))
+        let page = try PageRecognizer.recognize(image)
+        print("===== \(url.lastPathComponent)：第 \(page.pageNumber.map(String.init) ?? "?") 页 \(page.toPlay?.name ?? "?")先 题型 \(page.goal?.name ?? "?") 共 \(page.diagrams.count) 图 没认出 \(page.missingNumbers)")
+        for found in page.diagrams {
+            print("第 \(found.number.map(String.init) ?? "?") 题\(found.isIncomplete ? "（没拍全）" : "") \(found.columns)×\(found.rows) 边 \(found.edges.rawValue) 不确定 \(found.uncertain.count) 数字 \(found.labels.map { "(\($0.key.column),\($0.key.row))=\($0.value)" }) 位置 \(Int(found.bounds.minX)),\(Int(found.bounds.minY)) \(Int(found.bounds.width))×\(Int(found.bounds.height))")
+            print(diagram(found).joined(separator: "\n"))
+        }
+    }
+}
+}
+
+private func photo(_ name: String) -> URL? { samplePhotos.first { $0.lastPathComponent == name } }
+
+/// 2026-10 拍的几页练习册：拍歪、阴影、书页弯曲、反光、棋子摆得很密。
+extension PhotoSuites {
+@Suite("新样例照片", .enabled(if: photo("IMG_0325.HEIC") != nil, "本机没有这几张样例照片"))
+struct MoreSamplePhotosTests {
+    private func page(_ name: String) throws -> RecognizedPage {
+        let url = try #require(photo(name))
+        let image = try #require(PhotoLoader.image(at: url))
+        return try PageRecognizer.recognize(image)
+    }
+
+    @Test("第 37 页：拍歪了、棋子很密，6 道题都认出来；23 题只读出 \"3\" 时按前后题号改正")
+    func page37() throws {
+        let page = try page("IMG_0325.HEIC")
+        #expect(page.pageNumber == 37)
+        #expect(page.goal == .capturingRace)
+        #expect(page.diagrams.map(\.number) == [19, 20, 21, 22, 23, 24])
+        #expect(page.diagrams.allSatisfy { $0.columns == 9 && $0.rows == 9 && !$0.isIncomplete })
+        // 夹在黑子中间的白子：23 题第 8 行第 6 列，24 题第 7 行第 2、3 列。
+        #expect(diagram(page.diagrams[4])[7] == ".OX.XOXXO")
+        #expect(diagram(page.diagrams[5])[6] == "XOOXOXOX.")
+    }
+
+    @Test("第 36 页：书页弯曲处反光，16、18 题认不出、14 题没拍全，都要告诉家长")
+    func page36() throws {
+        let page = try page("IMG_0326.HEIC")
+        #expect(page.pageNumber == 36)
+        #expect(page.diagrams.map(\.number) == [13, 14, 15, 17])
+        #expect(page.diagrams.map(\.isIncomplete) == [false, true, false, false])
+        #expect(page.missingNumbers == [16])
+        // 17 题拍得最歪（横线斜率约 0.1）。
+        #expect(diagram(page.diagrams[3])[6] == ".OXXOOX.X")
+    }
+
+    @Test("扑：吃子题，照片下面露出半截的 11、12 题不要，题号圈和白子上的数字不当页码")
+    func pounce() throws {
+        let page = try page("IMG_0329.HEIC")
+        #expect(page.goal == .capture)
+        #expect(page.toPlay == .black)
+        #expect(page.diagrams.map(\.number) == [7, 8, 9, 10])
+        #expect(page.pageNumber == nil)
+    }
+
+    @Test("章节扉页上的装饰棋盘不当成题")
+    func titlePage() throws {
+        #expect(try page("IMG_0328.HEIC").diagrams.isEmpty)
+    }
+}
+}
+
+@Suite("题号")
+struct NumberingTests {
+    @Test("题号中间断开的就是没认出来的题")
+    func missingNumbers() {
+        func diagram(_ number: Int?) -> RecognizedDiagram {
+            RecognizedDiagram(id: number ?? 0, number: number, bounds: .zero, columns: 9, rows: 9, edges: [], stones: [])
+        }
+        #expect(RecognizedPage(imageSize: .zero, diagrams: [13, 14, 15, 17].map(diagram)).missingNumbers == [16])
+        #expect(RecognizedPage(imageSize: .zero, diagrams: [7, 8].map(diagram)).missingNumbers == [])
+        #expect(RecognizedPage(imageSize: .zero, diagrams: [diagram(nil)]).missingNumbers == [])
+    }
+}
+
+@Suite("版面格子")
+struct LayoutSlotTests {
+    private func diagram(_ number: Int?, x: Double, y: Double) -> RecognizedDiagram {
+        RecognizedDiagram(id: Int(x + y), number: number, bounds: CGRect(x: x, y: y, width: 500, height: 500), columns: 9, rows: 9, edges: [], stones: [])
+    }
+
+    @Test("两列三行、少了右边中间那个：按格子数，不按认出来的个数")
+    func slotsSkipMissingDiagram() {
+        let diagrams = [diagram(13, x: 470, y: 400), diagram(14, x: 1260, y: 380), diagram(15, x: 465, y: 1010), diagram(nil, x: 440, y: 1615)]
+        #expect(PageRecognizer.layoutSlots(of: diagrams) == [0, 1, 2, 4])
     }
 }

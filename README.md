@@ -10,13 +10,16 @@
   - `GoVision`：从照片识别印刷习题：找棋盘图、认黑白子、读“黑先”、题型、题号和页码。
   - `GoUI`：棋盘和摆题、做题界面，iOS 和 macOS 都能编译。
   - `board-snapshot`：把棋盘渲染成 PNG，没有模拟器时检查画面用。
-- `ThirdParty/KataGo/`：KataGo v1.16.4 源码里 App 用得到的部分（MIT 许可，见其中的 `LICENSE`），用 Metal 后端。
-- `ThirdParty/KataGoBridge/`：在 App 进程里跑 KataGo 分析引擎的 Objective-C++ 桥。
+- `ThirdParty/KataGo/`：KataGo v1.16.4 源码里 App 用得到的部分（MIT 许可，见其中的 `LICENSE`），包括 Metal（GPU）和 Eigen（CPU）两个后端。`neuralnet/eigenbackend.cpp` 为了在苹果芯片上提速改过几处，都标了“登登围棋改动”。
+- `ThirdParty/KataGoBridge/`：在 App 进程里跑 KataGo 分析引擎的 Objective-C++ 桥，以及运行时在两个后端之间转发的 `KataGoBackend.cpp`。
+- `ThirdParty/Eigen/`：Eigen 3.4.0 矩阵库的头文件（MPL2 许可），CPU 后端用。
 
 ## 判题引擎（KataGo）
 
-做题时用本地的 KataGo 判对错、替对方应，不用联网。没打包模型、或者在模拟器上时，退回入门判题器（只会吃子、逃子、对杀）。
+做题时用本地的 KataGo 判对错、替对方应，不用联网。没打包模型时退回入门判题器（只会吃子、逃子、对杀）。
 
+- **GPU 还是 CPU 自动选**：有能用的 GPU 就用 Metal（GPU），模拟器里自动换成 Eigen（CPU）——模拟器的虚拟 GPU 不支持 Metal 后端用的 MPSGraph，一算就崩。摆题页“题目目标”下面的灰字会写“判题：KataGo（GPU）……”或“KataGo（CPU）”。
+- **启动参数**：`-katagoHardware gpu` / `cpu` 强制用某一个，`off` 不用引擎（UI 测试用这个，判题快、结果固定）。在 Xcode 里是 Product → Scheme → Edit Scheme → Run → Arguments。
 - **模型不在仓库里**（约 98MB），第一次编译前先下载：
 
   ```bash
@@ -24,13 +27,14 @@
   ```
 
   下载到 `DengDengGo/Engine/kata1-b18c384nbt.bin.gz`，编译时自动打包进 App。KataGo 的模型按 KataGo Neural Network License 发布，可以随 App 分发，但要附上版权和许可声明；上架前要在 App 里加一个“致谢”页，放 KataGo 和模型的许可。
-- **模拟器上不跑引擎**：模拟器的虚拟 GPU 不支持 KataGo Metal 后端用的 MPSGraph，一算就崩。要试引擎得装到真 iPad 上。
-- **怎么判**：题目外面摆上两色都活净的外框，让全盘输赢只取决于题目这一块；孩子这一手比引擎认为最好的一手亏 1.5 目以上就算错。题目开头比较“做题方先下”和“做题方停一手”，归属变化大的子就是要分死活的子，这些子都倒向做题方时算做完。
-- **速度**：iPad mini（A17 Pro）上每个局面算 400 次，开头的分析要 10 秒左右，进入做题后就在后台算，孩子想的时候已经算好；下完一手到判出结果一般 1～4 秒。
-- **在真机上自测**：把作业照片拷进 App 的 Documents，用 `-engineSelfTest` 参数启动，会打印每道题引擎找到的正解和用时：
+- **CPU 慢得多**：在 Mac 的模拟器里每秒约 8 次（iPad mini 的 GPU 约 60 次），开头的分析要一分多钟，下完一手判出结果要几十秒。只适合开发时在模拟器里试流程，给孩子用要装到真 iPad 上。第 35 页 6 道题 CPU 和 GPU 的答案一致。
+- **怎么判**：题目外面摆上都活净的外框，让全盘输赢只取决于题目这一块；孩子这一手比引擎认为最好的一手亏 1.5 目以上就算错。题目开头比较“做题方先下”和“做题方停一手”，归属变化大的子就是要分死活的子，这些子都倒向做题方时算做完。
+- **外框的颜色**：吃子、逃子、做活、杀棋题按题目要谁跑出去定一种颜色；对杀和没设目标的题，每条边用离那条边最近的子的颜色（比如上边黑、右边白），双方在外面的子都算活的。搜索时双方都不下离棋子两路以外的空点，免得引擎去外框交界处占地。
+- **GPU 的速度**：iPad mini（A17 Pro）上每个局面算 400 次，开头的分析要 10 秒左右，进入做题后就在后台算，孩子想的时候已经算好；下完一手到判出结果一般 1～4 秒。
+- **自测**：用 `-engineSelfTest <照片路径>` 启动，会打印用的是 GPU 还是 CPU、速度，以及每道题引擎找到的正解和用时。模拟器里直接传 Mac 上照片的绝对路径；真机上先把照片拷进 App 的 Documents：
 
   ```bash
-  xcrun devicectl device copy to --device <iPad 的 UDID> --domain-type appDataContainer --domain-identifier com.sandszy.dengdenggo --source 棋盘照片样例.HEIC --destination Documents/sample.heic
+  xcrun devicectl device copy to --device <iPad 的 UDID> --domain-type appDataContainer --domain-identifier com.sandszy.dengdenggo --source 棋盘照片样例/棋盘照片样例.HEIC --destination Documents/sample.heic
   ```
 
   ```bash
@@ -60,7 +64,7 @@ cd GoKit && swift test
 cd GoKit && swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 ```
 
-识别测试有两部分：一部分用程序画的棋谱图，随时能跑；另一部分读真实的作业照片。照片是孩子的作业，不进仓库（见 `.gitignore`），放在仓库根目录的 `棋盘照片样例.HEIC` 或 `Samples/` 下时才会测。
+识别测试有两部分：一部分用程序画的棋谱图，随时能跑；另一部分读真实的作业照片。照片是孩子的作业，不进仓库（见 `.gitignore`），放在仓库根目录的 `棋盘照片样例/` 或 `Samples/` 文件夹里时才会测：已知内容的几张逐子核对，其余的打印识别结果供人工对照。新拍的照片放进去就会跑。
 
 界面布局的 UI 测试（横屏、竖屏、提示位置）在 iPad 模拟器上跑，截图会存进测试结果：
 

@@ -10,13 +10,15 @@ public protocol KataGoTransport: Sendable {
 
 /// 通过 KataGo 的 analysis JSON 协议分析局面。同时可以有好几个请求在算，按 id 对上结果。
 public final class KataGoEngine: GoEngine, @unchecked Sendable {
+    public let name: String
     private let transport: any KataGoTransport
     private let lock = NSLock()
     private var nextID = 0
     private var waiting: [String: CheckedContinuation<EngineAnalysis, any Error>] = [:]
     private var sizes: [String: Int] = [:]
 
-    public init(transport: any KataGoTransport) {
+    public init(transport: any KataGoTransport, name: String = "KataGo") {
+        self.name = name
         self.transport = transport
         transport.start { [weak self] line in self?.receive(line) }
     }
@@ -88,7 +90,7 @@ public enum KataGoProtocol {
             moves.append([color(player), move.map { vertex($0, size: size) } ?? "pass"])
             player = player.opponent
         }
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "id": id,
             "initialStones": stones,
             "moves": moves,
@@ -100,6 +102,11 @@ public enum KataGoProtocol {
             "maxVisits": query.maxVisits,
             "includeOwnership": true,
         ]
+        if !query.avoid.isEmpty {
+            let points = query.avoid.map { vertex($0, size: size) }
+            // untilDepth 给得足够大，整个搜索里都不下这些点。
+            object["avoidMoves"] = ["B", "W"].map { ["player": $0, "moves": points, "untilDepth": 1000] }
+        }
         let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
     }

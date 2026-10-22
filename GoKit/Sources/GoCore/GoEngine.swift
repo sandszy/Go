@@ -7,13 +7,16 @@ public struct EngineQuery: Sendable, Hashable {
     public var moves: [Point?]
     public var komi: Double
     public var maxVisits: Int
+    /// 搜索时双方都不下这些点。题目区域里离棋子很远的空地放在这里，引擎就不会去那里占地。
+    public var avoid: [Point]
 
-    public init(board: Board, firstPlayer: Stone, moves: [Point?] = [], komi: Double, maxVisits: Int) {
+    public init(board: Board, firstPlayer: Stone, moves: [Point?] = [], komi: Double, maxVisits: Int, avoid: [Point] = []) {
         self.board = board
         self.firstPlayer = firstPlayer
         self.moves = moves
         self.komi = komi
         self.maxVisits = maxVisits
+        self.avoid = avoid
     }
 
     /// 现在轮到谁下。
@@ -61,5 +64,11 @@ public enum EngineError: Error, Sendable {
 
 /// 围棋引擎，比如 KataGo。
 public protocol GoEngine: Sendable {
+    /// 给家长看的名字，比如"KataGo（GPU）"。
+    var name: String { get }
     func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis
+}
+
+extension GoEngine {
+    public var name: String { "引擎" }
 }

@@ -33,6 +33,7 @@ public enum PageRecognizer {
                 ?? readRingedNumber(beside: diagrams[index], image: image, ink: ink, scale: toOriginal)
         }
         fillNumberSequence(&diagrams)
+        markIncomplete(&diagrams)
         for index in diagrams.indices {
             diagrams[index].labels = readLabels(on: diagrams[index], image: image)
         }
@@ -42,8 +43,8 @@ public enum PageRecognizer {
             diagrams: diagrams,
             toPlay: TextReader.toPlay(in: text),
             goal: TextReader.goal(in: text),
-            pageNumber: pageNumber(in: text, imageHeight: Double(image.height), diagrams: diagrams)
-                ?? readPageNumberStrip(of: image, below: diagrams)
+            pageNumber: pageNumber(in: text, imageHeight: Double(image.height), diagrams: diagrams, ink: ink, scale: toOriginal)
+                ?? readPageNumberStrip(of: image, below: diagrams, ink: ink, scale: toOriginal)
                 ?? readPageNumberBlobs(of: image, below: diagrams, ink: ink, scale: toOriginal)
         )
     }
@@ -55,7 +56,7 @@ public enum PageRecognizer {
         let top = max(diagrams.map(\.bounds.maxY).max() ?? 0, height * 0.8)
         let strip = CGRect(x: 0, y: top, width: Double(image.width), height: height - top)
         let blobs = GlyphReader.textBlobs(in: ink, area: strip, scale: scale, minHeight: spacing * 0.3, maxHeight: spacing * 1.2)
-        for blob in blobs {
+        for blob in blobs where !isInsideBadge(blob, diagrams: diagrams, ink: ink, scale: scale) {
             let padded = blob.insetBy(dx: -blob.height * 0.6, dy: -blob.height * 0.6)
             guard let crop = PhotoLoader.crop(image, to: padded) else { continue }
             for fast in [false, true] {
@@ -132,21 +133,86 @@ public enum PageRecognizer {
     }
 
     /// 还有没读出题号的，按阅读顺序从读出来的题号往前往后推。几个读出来的题号对不上时就不推，免得推错。
+    /// 题号按版面上的格子排：练习册一页是几行几列整齐排的，题号从左到右、从上到下数。
+    /// 没认出来的图也占着一个格子，所以按格子算，而不是按认出来的图数。
     private static func fillNumberSequence(_ diagrams: inout [RecognizedDiagram]) {
-        let offsets = Set(diagrams.enumerated().compactMap { index, diagram in diagram.number.map { $0 - index } })
-        guard offsets.count == 1, let offset = offsets.first, offset + 0 >= 1 else { return }
+        let slots = layoutSlots(of: diagrams)
+        // 先看前后：前后两道题的题号差和格子差一样，中间这道的题号就定了。没读出来的补上，
+        // 读错的（比如 23 只读出 "3"）改过来。
+        if diagrams.count >= 3 {
+            for index in 1..<(diagrams.count - 1) {
+                guard let before = diagrams[index - 1].number, let after = diagrams[index + 1].number,
+                      after - before == slots[index + 1] - slots[index - 1] else { continue }
+                diagrams[index].number = before + slots[index] - slots[index - 1]
+            }
+        }
+        // 再看整页：读出来的题号都是"格子号 + 同一个数"，没读出来的就按这个补。
+        let offsets = Set(diagrams.indices.compactMap { index in diagrams[index].number.map { $0 - slots[index] } })
+        guard offsets.count == 1, let offset = offsets.first, offset >= 1 else { return }
         for index in diagrams.indices where diagrams[index].number == nil {
-            diagrams[index].number = offset + index
+            diagrams[index].number = offset + slots[index]
         }
     }
 
-    /// 页码印在页面最下面，不是题号。
-    private static func pageNumber(in text: [TextItem], imageHeight: Double, diagrams: [RecognizedDiagram]) -> Int? {
+    /// 每个图在版面上是第几格（从 0 数，一行一行数）。左边差不多齐的算同一列，上边差不多齐的算同一行。
+    static func layoutSlots(of diagrams: [RecognizedDiagram]) -> [Int] {
+        let widths: [Double] = diagrams.map { Double($0.bounds.width) }
+        let heights: [Double] = diagrams.map { Double($0.bounds.height) }
+        guard let width = median(widths), let height = median(heights) else { return [] }
+        let columns = groupStarts(diagrams.map { Double($0.bounds.minX) }, tolerance: width / 2)
+        let rows = groupStarts(diagrams.map { Double($0.bounds.minY) }, tolerance: height / 2)
+        return diagrams.map { diagram in
+            let row = groupIndex(of: Double(diagram.bounds.minY), in: rows)
+            let column = groupIndex(of: Double(diagram.bounds.minX), in: columns)
+            return row * columns.count + column
+        }
+    }
+
+    /// 排好序以后，和前一组的起点差得比 tolerance 多就是新的一组，返回每组的起点。
+    private static func groupStarts(_ values: [Double], tolerance: Double) -> [Double] {
+        var starts: [Double] = []
+        for value in values.sorted() {
+            if let last = starts.last, value - last <= tolerance { continue }
+            starts.append(value)
+        }
+        return starts
+    }
+
+    private static func groupIndex(of value: Double, in starts: [Double]) -> Int {
+        var index = 0
+        for (i, start) in starts.enumerated() where start <= value + 1 {
+            index = i
+        }
+        return index
+    }
+
+    /// 同一页的图一般一样大。行数或列数比大多数图少两条以上，就是没拍全。
+    private static func markIncomplete(_ diagrams: inout [RecognizedDiagram]) {
+        guard diagrams.count >= 3,
+              let columns = median(diagrams.map { Double($0.columns) }),
+              let rows = median(diagrams.map { Double($0.rows) })
+        else { return }
+        for index in diagrams.indices {
+            let diagram = diagrams[index]
+            diagrams[index].isIncomplete = Double(diagram.columns) <= columns - 2 || Double(diagram.rows) <= rows - 2
+        }
+    }
+
+    /// 圈在圆圈里的是题号（照片下面露出半截的下一道题），不是页码。
+    private static func pageNumber(in text: [TextItem], imageHeight: Double, diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Int? {
         let lowest = diagrams.map(\.bounds.maxY).max() ?? 0
         return text
-            .filter { $0.box.minY > max(lowest, imageHeight * 0.75) }
+            .filter { $0.box.minY > max(lowest, imageHeight * 0.75) && !isInsideBadge($0.box, diagrams: diagrams, ink: ink, scale: scale) }
             .compactMap { TextReader.number(in: $0.text) }
             .first
+    }
+
+    private static func isInsideBadge(_ box: CGRect, diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Bool {
+        guard let spacing = median(diagrams.map { $0.spacing / scale }) else { return false }
+        let center = CGPoint(x: box.midX, y: box.midY)
+        let area = box.insetBy(dx: -box.height * 1.5, dy: -box.height * 1.5)
+        guard let badge = GlyphReader.findBadge(in: ink, area: area, spacing: spacing, scale: scale, near: center) else { return false }
+        return hypot(badge.center.x - center.x, badge.center.y - center.y) < badge.radius
     }
 
     /// 棋子上的数字太小，整页读不出来。只把中间有墨迹的白子里面那块抠出来单独读；
@@ -175,7 +241,7 @@ public enum PageRecognizer {
     }
 
     /// 页码字小，整页读时常常漏掉。把最后一个棋盘图下面那一条单独裁出来再读。
-    static func readPageNumberStrip(of image: CGImage, below diagrams: [RecognizedDiagram]) -> Int? {
+    static func readPageNumberStrip(of image: CGImage, below diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Int? {
         let height = Double(image.height)
         let top = max(diagrams.map(\.bounds.maxY).max() ?? 0, height * 0.8)
         let width = Double(image.width)
@@ -189,7 +255,10 @@ public enum PageRecognizer {
             guard let crop = PhotoLoader.crop(image, to: piece) else { continue }
             for fast in [false, true] {
                 let items = (try? TextReader.read(crop, minimumTextHeight: 0, languages: ["en-US"], fast: fast)) ?? []
-                if let number = items.lazy.compactMap({ TextReader.number(in: $0.text) }).first { return number }
+                let numbers = items.lazy
+                    .filter { !isInsideBadge($0.box.offsetBy(dx: piece.minX, dy: piece.minY), diagrams: diagrams, ink: ink, scale: scale) }
+                    .compactMap { TextReader.number(in: $0.text) }
+                if let number = numbers.first { return number }
             }
         }
         return nil

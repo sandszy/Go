@@ -79,7 +79,11 @@ public actor EngineSolver {
 
     private func task(for moves: [Point?]) -> Task<EngineAnalysis, any Error> {
         if let task = analyses[moves] { return task }
-        let query = EngineQuery(board: frame.board, firstPlayer: problem.toPlay, moves: moves, komi: frame.komi, maxVisits: visits)
+        let current = position(after: moves)?.board ?? frame.board
+        let query = EngineQuery(
+            board: frame.board, firstPlayer: problem.toPlay, moves: moves, komi: frame.komi, maxVisits: visits,
+            avoid: frame.distantPoints(on: current)
+        )
         let engine = engine
         let task = Task { () async throws -> EngineAnalysis in try await engine.analyze(query) }
         analyses[moves] = task
@@ -128,6 +132,20 @@ public actor EngineSolver {
     private func analysisSuggestsPass(_ analysis: EngineAnalysis) -> Bool {
         guard let best = analysis.candidates.first else { return false }
         return best.move == nil || !frame.area.contains(best.move!)
+    }
+
+    /// 从题目开始下完 moves 以后的局面。有下不了的手（不该发生）时返回 nil。
+    private func position(after moves: [Point?]) -> Position? {
+        var position = Position(board: frame.board, toPlay: problem.toPlay)
+        for move in moves {
+            if let move {
+                guard let next = try? position.playing(move) else { return nil }
+                position = next.position
+            } else {
+                position = position.passing()
+            }
+        }
+        return position
     }
 }
 

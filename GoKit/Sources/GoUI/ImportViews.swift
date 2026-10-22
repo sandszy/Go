@@ -118,11 +118,11 @@ struct DiagramChooser: View {
                                         RoundedRectangle(cornerRadius: 8)
                                             .fill(Color.accentColor.opacity(0.12))
                                             .strokeBorder(Color.accentColor, lineWidth: 3)
-                                        Text(diagram.number.map { "第 \($0) 题" } ?? "选这道")
+                                        Text(label(for: diagram))
                                             .font(.headline)
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 4)
-                                            .background(Color.accentColor, in: Capsule())
+                                            .background(diagram.isIncomplete ? Color.orange : Color.accentColor, in: Capsule())
                                             .foregroundStyle(.white)
                                             .padding(6)
                                     }
@@ -130,7 +130,7 @@ struct DiagramChooser: View {
                                 .buttonStyle(.plain)
                                 .frame(width: frame.width, height: frame.height)
                                 .offset(x: frame.minX, y: frame.minY)
-                                .accessibilityLabel(diagram.number.map { "第 \($0) 题" } ?? "题目")
+                                .accessibilityLabel(label(for: diagram))
                             }
                         }
                         .frame(width: fit.size.width, height: fit.size.height)
@@ -148,11 +148,21 @@ struct DiagramChooser: View {
         }
     }
 
+    private func label(for diagram: RecognizedDiagram) -> String {
+        let name = diagram.number.map { "第 \($0) 题" } ?? "选这道"
+        return diagram.isIncomplete ? "\(name) · 没拍全" : name
+    }
+
     private func summary(of page: RecognizedPage) -> String {
         var parts = ["找到 \(page.diagrams.count) 道题"]
         if let toPlay = page.toPlay { parts.append("\(toPlay.name)先") }
         if let goal = page.goal { parts.append(goal.name) }
         if let number = page.pageNumber { parts.append("第 \(number) 页") }
+        let missing = page.missingNumbers
+        if !missing.isEmpty {
+            // 多半是反光、阴影或书页弯曲挡住了，重拍一张或者手动摆。
+            parts.append("第 \(missing.map(String.init).joined(separator: "、")) 题没认出来，可以重拍")
+        }
         return parts.joined(separator: " · ")
     }
 

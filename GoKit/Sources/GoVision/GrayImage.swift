@@ -80,16 +80,27 @@ struct InkMask {
         return bits[y * width + x]
     }
 
+    /// 照片拍歪了、纸页弯了，棋盘线就不是正横正竖的。除了正横正竖，再沿这些斜率扫，
+    /// 斜着的线总有一个斜率跟它差不多，能扫出够长的一段。
+    static let scanSlopes: [Double] = [-0.1, -0.08, -0.06, -0.04, -0.02, 0, 0.02, 0.04, 0.06, 0.08, 0.1]
+
     /// 只留下细的横线：上下 gap 像素处都是纸，且连续长度不少于 minLength。黑子内部、文字笔画会被去掉。
     /// 和竖线交叉的地方上下也是墨迹，这种不超过 gap + 2 像素的短暂中断可以跨过去；黑子太宽，跨不过去。
+    /// 沿 scanSlopes 里的每个斜率各扫一遍（y = 起点 + 斜率 × x），合起来。
     func thinHorizontalRuns(minLength: Int, gap: Int) -> InkMask {
         var result = [Bool](repeating: false, count: width * height)
-        for y in 0..<height {
-            scanRun(length: width, minLength: minLength, bridge: gap + 2) { x in
-                guard self[x, y] else { return nil }
-                return !self[x, y - gap] && !self[x, y + gap]
-            } mark: { x in
-                result[y * width + x] = true
+        for slope in Self.scanSlopes {
+            let reach = Int((abs(slope) * Double(width)).rounded(.up))
+            for start in -reach..<(height + reach) {
+                func y(_ x: Int) -> Int { start + Int((slope * Double(x)).rounded()) }
+                scanRun(length: width, minLength: minLength, bridge: gap + 2) { x in
+                    let y = y(x)
+                    guard self[x, y] else { return nil }
+                    return !self[x, y - gap] && !self[x, y + gap]
+                } mark: { x in
+                    let y = y(x)
+                    if y >= 0 && y < height { result[y * width + x] = true }
+                }
             }
         }
         return InkMask(width: width, height: height, bits: result)
@@ -98,12 +109,18 @@ struct InkMask {
     /// 只留下细的竖线，和 thinHorizontalRuns 对称。
     func thinVerticalRuns(minLength: Int, gap: Int) -> InkMask {
         var result = [Bool](repeating: false, count: width * height)
-        for x in 0..<width {
-            scanRun(length: height, minLength: minLength, bridge: gap + 2) { y in
-                guard self[x, y] else { return nil }
-                return !self[x - gap, y] && !self[x + gap, y]
-            } mark: { y in
-                result[y * width + x] = true
+        for slope in Self.scanSlopes {
+            let reach = Int((abs(slope) * Double(height)).rounded(.up))
+            for start in -reach..<(width + reach) {
+                func x(_ y: Int) -> Int { start + Int((slope * Double(y)).rounded()) }
+                scanRun(length: height, minLength: minLength, bridge: gap + 2) { y in
+                    let x = x(y)
+                    guard self[x, y] else { return nil }
+                    return !self[x - gap, y] && !self[x + gap, y]
+                } mark: { y in
+                    let x = x(y)
+                    if x >= 0 && x < width { result[y * width + x] = true }
+                }
             }
         }
         return InkMask(width: width, height: height, bits: result)

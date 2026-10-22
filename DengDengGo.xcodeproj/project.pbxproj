@@ -43,6 +43,17 @@
 		DD0000000000000000000044 /* libKataGoSwift.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libKataGoSwift.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		DD0000000000000000000070 /* Exceptions for "ThirdParty/KataGo/cpp" folder in "KataGo" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				neuralnet/eigenbackend.cpp,
+				neuralnet/metalbackend.cpp,
+			);
+			target = DD0000000000000000000050 /* KataGo */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		DD0000000000000000000003 /* DengDengGo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -56,6 +67,9 @@
 		};
 		DD0000000000000000000047 /* KataGo C++ */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DD0000000000000000000070 /* Exceptions for "ThirdParty/KataGo/cpp" folder in "KataGo" target */,
+			);
 			name = "KataGo C++";
 			path = ThirdParty/KataGo/cpp;
 			sourceTree = "<group>";
@@ -463,6 +477,8 @@
 				OTHER_LDFLAGS = (
 					"-lz",
 					"-lc++",
+					"-framework",
+					Accelerate,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sandszy.dengdenggo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -501,6 +517,8 @@
 				OTHER_LDFLAGS = (
 					"-lz",
 					"-lc++",
+					"-framework",
+					Accelerate,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sandszy.dengdenggo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -558,6 +576,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					USE_METAL_BACKEND,
 					NO_GIT_REVISION,
+					NDEBUG,
 				);
 				GCC_WARN_INHIBIT_ALL_WARNINGS = YES;
 				HEADER_SEARCH_PATHS = (
@@ -565,6 +584,7 @@
 					"$(SRCROOT)/ThirdParty/KataGo/cpp/external",
 					"$(SRCROOT)/ThirdParty/KataGo/cpp/external/tclap-1.2.2/include",
 					"$(SRCROOT)/ThirdParty/KataGo/cpp/external/filesystem-1.5.8/include",
+					"$(SRCROOT)/ThirdParty/Eigen",
 					"$(CONFIGURATION_TEMP_DIR)/KataGoSwift.build/DerivedSources",
 					"$(TOOLCHAIN_DIR)/usr/lib/swift",
 				);
@@ -586,6 +606,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					USE_METAL_BACKEND,
 					NO_GIT_REVISION,
+					NDEBUG,
 				);
 				GCC_WARN_INHIBIT_ALL_WARNINGS = YES;
 				HEADER_SEARCH_PATHS = (
@@ -593,6 +614,7 @@
 					"$(SRCROOT)/ThirdParty/KataGo/cpp/external",
 					"$(SRCROOT)/ThirdParty/KataGo/cpp/external/tclap-1.2.2/include",
 					"$(SRCROOT)/ThirdParty/KataGo/cpp/external/filesystem-1.5.8/include",
+					"$(SRCROOT)/ThirdParty/Eigen",
 					"$(CONFIGURATION_TEMP_DIR)/KataGoSwift.build/DerivedSources",
 					"$(TOOLCHAIN_DIR)/usr/lib/swift",
 				);

@@ -124,3 +124,23 @@ struct EngineSolverTests {
         #expect(await EngineSolver(problem: .sample, engine: Broken()).judge([e2]) == .unknown)
     }
 }
+
+@Suite("引擎搜索范围")
+struct EngineSearchAreaTests {
+    @Test("请求里双方都避开离棋子很远的空点")
+    func avoidMoves() throws {
+        let query = EngineQuery(board: Board(size: 19), firstPlayer: .black, komi: 6.5, maxVisits: 10, avoid: [Point(0, 0)])
+        let json = try JSONSerialization.jsonObject(with: Data(KataGoProtocol.request(id: "1", query: query).utf8)) as! [String: Any]
+        let avoid = try #require(json["avoidMoves"] as? [[String: Any]])
+        #expect(avoid.map { $0["player"] as? String } == ["B", "W"])
+        #expect(avoid.first?["moves"] as? [String] == ["A19"])
+    }
+
+    @Test("第 7 题：棋子旁边两路以内的空点能下，远处的空点不下")
+    func distantPoints() {
+        let frame = TsumegoFrame(problem: .sample)
+        let far = Set(frame.distantPoints(on: frame.board))
+        #expect(!far.contains(Point(4, 17)))   // E2，正解
+        #expect(far.contains(Point(0, frame.area.minY)))   // 区域左上角，离棋子很远
+    }
+}
