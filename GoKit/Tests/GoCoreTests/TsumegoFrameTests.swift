@@ -31,6 +31,16 @@ struct TsumegoFrameTests {
         #expect(frame.board.groupsWithoutLiberties.isEmpty)
     }
 
+    @Test("对杀题的外框贴着棋子外面一路摆，吃子题留着印出来的那一块")
+    func tightArea() {
+        let race = TsumegoFrame(problem: .sample)
+        var capture = Problem.sample
+        capture.goal = .capture
+        #expect(race.area.width < TsumegoFrame(problem: capture).area.width)
+        // 第 7 题的子在 A..G 列、1..5 行，外面留一路。
+        #expect(race.area == BoardRegion(minX: 0, minY: 13, maxX: 7, maxY: 18))
+    }
+
     @Test("9 路棋盘不加外框")
     func smallBoard() {
         var board = Board(size: 9)

@@ -15,11 +15,18 @@ public struct TsumegoFrame: Sendable {
     public init(problem: Problem) {
         let setup = problem.setup
         let size = setup.size
-        let area = Self.area(for: problem)
+        var area = Self.area(for: problem)
         let unframed = (board: setup, area: BoardRegion.full(size: size), komi: 6.5)
 
         let wall = Self.wallColor(for: problem)
-        let sides = Self.sideColors(for: problem, area: area)
+        var sides = Self.sideColors(for: problem, area: area)
+        if sides != nil {
+            // 各边分颜色的外框（对杀等）贴着棋子外面一路摆：题目里没子的空地留着的话，
+            // 两种颜色外框的交界处会空出一片，引擎觉得去那里占地比对杀划算。
+            // 吃子、逃子题不这样收紧：能不能跑出去和外面有多少空地有关。
+            area = BoardRegion.fitting(setup, margin: 1, snap: 1, minSpan: 1)
+            sides = Self.sideColors(for: problem, area: area)
+        }
         guard size >= 13, area.width * area.height * 2 <= size * size,
               let fill = Self.fill(setup: setup, area: area, sides: sides) ?? Self.fill(setup: setup, area: area, wall: wall)
         else {

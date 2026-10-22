@@ -7,7 +7,8 @@ import GoVision
 /// 识别照片上的每道题，打印引擎找到的正解和每一步用的时间，然后退出。
 /// 模拟器里的 App 能直接读 Mac 上的文件，传绝对路径就行；真机上先用 `xcrun devicectl device copy to`
 /// 把照片拷到 App 的 Documents，路径不以 / 开头时就到 Documents 里找。
-/// 再加 `-engineProblem <题号>` 只看那一道，并打印加了外框的棋盘和引擎考虑的每一手。
+/// 再加 `-engineProblem <题号>` 只看那一道，并打印加了外框的棋盘和引擎考虑的每一手；
+/// `-engineVisits <次数>` 改每个局面算多少次（默认 400）。
 enum EngineSelfTest {
     static func runIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -66,16 +67,29 @@ enum EngineSelfTest {
 
     /// 打印一道题加了外框的样子，以及做题方先下、停一手时引擎考虑的下法。
     private static func inspect(_ problem: Problem, engine: KataGoEngine) async {
+        let arguments = ProcessInfo.processInfo.arguments
+        let visits = arguments.firstIndex(of: "-engineVisits").flatMap { $0 + 1 < arguments.count ? Int(arguments[$0 + 1]) : nil } ?? 400
         let frame = TsumegoFrame(problem: problem)
         log("\(problem.title) 区域 \(frame.area) 贴目 \(frame.komi) 外框紧贴区域的颜色 \(TsumegoFrame.wallColor(for: problem).name)\n" + frame.board.diagram)
+        var results: [EngineAnalysis] = []
         for moves in [[], [nil]] as [[Point?]] {
-            let query = EngineQuery(board: frame.board, firstPlayer: problem.toPlay, moves: moves, komi: frame.komi, maxVisits: 400, avoid: frame.distantPoints(on: frame.board))
+            let query = EngineQuery(board: frame.board, firstPlayer: problem.toPlay, moves: moves, komi: frame.komi, maxVisits: visits, avoid: frame.distantPoints(on: frame.board))
             guard let analysis = try? await engine.analyze(query) else { continue }
+            results.append(analysis)
             log(moves.isEmpty ? "做题方先下：" : "做题方停一手、对方先下：")
             log("  根节点 胜率 \(String(format: "%.2f", analysis.winrate)) 领先 \(String(format: "%.1f", analysis.scoreLead))")
             for candidate in analysis.candidates.prefix(8) {
                 log("  \(candidate.move.map { KataGoProtocol.vertex($0, size: 19) } ?? "停") 访问 \(candidate.visits) 胜率 \(String(format: "%.2f", candidate.winrate)) 领先 \(String(format: "%.1f", candidate.scoreLead))")
             }
+        }
+        // 每个子：做题方先下和停一手时的归属（都从做题方看），差得多的就是要分死活的子。
+        if results.count == 2 {
+            let lines = problem.setup.occupiedPoints.map { p -> String in
+                let i = p.y * 19 + p.x
+                let first = results[0].ownership[i], passed = -results[1].ownership[i]
+                return "\(KataGoProtocol.vertex(p, size: 19))\(problem.setup[p] == .black ? "黑" : "白") \(String(format: "%.2f", first))/\(String(format: "%.2f", passed))\(abs(first - passed) >= 0.6 ? " ★" : "")"
+            }
+            log("归属（先下/停一手）：" + lines.joined(separator: "  "))
         }
     }
 

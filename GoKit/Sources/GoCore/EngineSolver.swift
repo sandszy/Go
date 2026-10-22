@@ -8,11 +8,20 @@ public actor EngineSolver {
     private let engine: any GoEngine
     private let visits: Int
     private var analyses: [[Point?]: Task<EngineAnalysis, any Error>] = [:]
-    private var keyStones: [Point: Double]?
+    private var keyStones: [Point: KeyStone]?
+
+    /// 题目要分死活的一个子。
+    private struct KeyStone {
+        /// 做题方先下时它倒向哪边：1 是归做题方，-1 是归对方。
+        var direction: Double
+        /// 做题方先下、双方都下最好时，它往 direction 那边倒了多少（归属乘 direction）。
+        var best: Double
+    }
 
     /// 比最好的下法亏这么多目以内都算对。外框让死活的差别至少有好几目，吃一个子也有两目。
     public static let tolerance = 1.5
     /// 题目要分死活的子，倒向做题方这么多就算定了。外框离得近时，引擎对死活的把握很少到 0.9。
+    /// 有的子双方都下最好也定不下来（引擎看是一半一半），这种子只要接近最好的结果就行，见 isFinished。
     static let settled = 0.5
     /// 做题方先下和停一手相比，归属变化超过这个值的子，就是题目要分死活的子。
     static let contested = 0.6
@@ -106,24 +115,28 @@ public actor EngineSolver {
         guard let keyStones = await findKeyStones(), !keyStones.isEmpty else { return false }
         let size = problem.setup.size
         // after 是对方要下的局面，归属从对方来看，取反才是做题方的。
-        return keyStones.allSatisfy { p, direction in
-            -(after.ownership[safe: p.y * size + p.x] ?? 0) * direction >= Self.settled
+        return keyStones.allSatisfy { p, stone in
+            let leaning = -(after.ownership[safe: p.y * size + p.x] ?? 0) * stone.direction
+            return leaning >= min(Self.settled, stone.best - 0.2)
         }
     }
 
     /// 题目要分死活的子，以及做题方先下时它们倒向哪边（1 是归做题方，-1 是归对方）。
     /// 做题方先下和停一手让对方先下，这些子的归属差别很大；外面早就活净或死净的子两种情况都一样。
-    private func findKeyStones() async -> [Point: Double]? {
+    private func findKeyStones() async -> [Point: KeyStone]? {
         if let keyStones { return keyStones }
         guard let first = try? await analysis([]), let passed = try? await analysis([nil]) else { return nil }
         let size = problem.setup.size
-        var stones: [Point: Double] = [:]
+        var stones: [Point: KeyStone] = [:]
         for p in problem.setup.occupiedPoints {
             let index = p.y * size + p.x
             guard let mine = first.ownership[safe: index], let theirs = passed.ownership[safe: index] else { continue }
             // passed 从对方来看，-theirs 才是做题方的；两者之差就是先下一手带来的变化。
             let change = mine + theirs
-            if abs(change) >= Self.contested { stones[p] = change > 0 ? 1 : -1 }
+            if abs(change) >= Self.contested {
+                let direction: Double = change > 0 ? 1 : -1
+                stones[p] = KeyStone(direction: direction, best: mine * direction)
+            }
         }
         keyStones = stones
         return stones

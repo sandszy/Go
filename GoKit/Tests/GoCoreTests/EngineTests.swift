@@ -116,6 +116,26 @@ struct EngineSolverTests {
         #expect(await solver().judge([e2, f1, Point(2, 17)]) == .solved)
     }
 
+    @Test("要分死活的子双方都下最好也只有一半把握时，下到接近最好的结果就算做完")
+    func undecidedKeyStone() async {
+        let key = Point(2, 15)   // 第 7 题里的一个黑子
+        let e2 = e2, f1 = f1
+        @Sendable func ownership(_ value: Double) -> [Double] {
+            var values = [Double](repeating: 0, count: 361)
+            values[key.y * 19 + key.x] = value
+            return values
+        }
+        // 黑先下最好时这个子只到 -0.2（说不准），黑停一手就死（从白看 +0.98）。
+        let solver = EngineSolver(problem: .sample, engine: ScriptedEngine { query in
+            switch query.moves {
+            case []: return EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.6, scoreLead: 3)], winrate: 0.6, scoreLead: 3, ownership: ownership(-0.2))
+            case [nil]: return EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.6, scoreLead: 2)], winrate: 0.6, scoreLead: 2, ownership: ownership(0.98))
+            default: return EngineAnalysis(candidates: [.init(move: f1, visits: 100, winrate: 0.4, scoreLead: -3)], winrate: 0.4, scoreLead: -3, ownership: ownership(0.25))
+            }
+        })
+        #expect(await solver.judge([e2]) == .solved)
+    }
+
     @Test("引擎出错时算不出来")
     func failure() async {
         struct Broken: GoEngine {
@@ -136,9 +156,11 @@ struct EngineSearchAreaTests {
         #expect(avoid.first?["moves"] as? [String] == ["A19"])
     }
 
-    @Test("第 7 题：棋子旁边两路以内的空点能下，远处的空点不下")
+    @Test("棋子旁边两路以内的空点能下，远处的空点不下（按吃子题摆，题目区域是印出来的那一大块）")
     func distantPoints() {
-        let frame = TsumegoFrame(problem: .sample)
+        var problem = Problem.sample
+        problem.goal = .capture
+        let frame = TsumegoFrame(problem: problem)
         let far = Set(frame.distantPoints(on: frame.board))
         #expect(!far.contains(Point(4, 17)))   // E2，正解
         #expect(far.contains(Point(0, frame.area.minY)))   // 区域左上角，离棋子很远
