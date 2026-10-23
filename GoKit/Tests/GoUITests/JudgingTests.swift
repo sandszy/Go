@@ -163,4 +163,46 @@ struct EngineJudgingTests {
         #expect(model.judgeSummary.contains("KataGo（CPU）"))
         #expect(!ProblemEditorModel(problem: problem).canJudge)
     }
+
+    private func solvingModel(_ problem: Problem = .sample) -> ProblemEditorModel {
+        let model = ProblemEditorModel(problem: problem, engine: NamedEngine())
+        model.replyDelay = .zero
+        model.confirmMoves = false
+        model.switchMode(to: .solve)
+        return model
+    }
+
+    @Test("下到题目外面：判错、提示可以悔棋，对方不应，后面自由下；悔掉再下又接着判")
+    func outsideArea() async {
+        let model = solvingModel()
+        model.tap(Point(0, 0))
+        await model.waitUntilIdle()
+        #expect(model.message?.text == "下到题目外面了，可以悔棋再试")
+        #expect(model.message?.tone == .warning)
+        #expect(model.tree.path.count == 2)
+        #expect(!model.isThinking)
+
+        // 后面不判：白子直接摆上，不会问引擎、不会出"算不出来"。
+        model.tap(Point(1, 0))
+        await model.waitUntilIdle()
+        #expect(model.tree.path.count == 3)
+        #expect(model.position.toPlay == .black)
+        #expect(model.message == nil)
+
+        model.undo()
+        model.undo()
+        model.tap(Point(4, 17))
+        await model.waitUntilIdle()
+        #expect(model.message?.text.contains("算不出来") == true)   // 假引擎一算就报错，说明又在判了
+    }
+
+    @Test("对杀题区域比印出来的图小：图里离棋子太远的地方，提示太远了")
+    func insidePrintedButFar() async {
+        var problem = Problem.sample
+        problem.region = BoardRegion(minX: 0, minY: 9, maxX: 9, maxY: 18)
+        let model = solvingModel(problem)
+        model.tap(Point(0, 10))
+        await model.waitUntilIdle()
+        #expect(model.message?.text == "离题目里的棋子太远了，可以悔棋再试")
+    }
 }

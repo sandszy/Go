@@ -39,8 +39,9 @@ public actor EngineSolver {
 
     /// moves 是从题目开始下的每一手，最后一手是做题一方刚下的。
     public func judge(_ moves: [Point?]) async -> Verdict {
-        guard let last = moves.last,
-              let before = try? await analysis(Array(moves.dropLast())),
+        guard let last = moves.last else { return .unknown }
+        if let p = last, isOutside(p) { return .wrong }
+        guard let before = try? await analysis(Array(moves.dropLast())),
               let after = try? await analysis(moves)
         else { return .unknown }
 
@@ -51,6 +52,11 @@ public actor EngineSolver {
         }
         if before.scoreLead - score > Self.tolerance { return .wrong }
         return await isFinished(moves, after) ? .solved : .correct
+    }
+
+    /// 这一点在留给题目的区域外面。引擎那边区域外摆着外框，下在这里引擎不认，直接算错。
+    public nonisolated func isOutside(_ p: Point) -> Bool {
+        !frame.area.contains(p)
     }
 
     /// 轮到对方时替对方选一手，nil 表示停一手。判题时已经算过这个局面，直接用那次的结果。

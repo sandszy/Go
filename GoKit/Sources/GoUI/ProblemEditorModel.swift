@@ -78,14 +78,19 @@ actor Judge {
     /// 判错以后还能不能接着陪下、接着判。引擎看的是眼前的局面，可以；
     /// 入门判题器是按题目开头定的"谁要吃谁"算的，局面一乱就不准，判错就停。
     nonisolated let continuesAfterWrong: Bool
+    /// 引擎判题时留给题目的区域，区域外是引擎那边的外框，下在那里引擎不认。入门判题器没有外框，是 nil。
+    nonisolated let area: BoardRegion?
 
     init?(problem: Problem, engine: (any GoEngine)?) {
         if let engine, !problem.setup.isEmpty {
-            backend = .engine(EngineSolver(problem: problem, engine: engine))
+            let solver = EngineSolver(problem: problem, engine: engine)
+            backend = .engine(solver)
             continuesAfterWrong = true
+            area = solver.frame.area
         } else if let solver = ProblemSolver(problem: problem) {
             backend = .search(solver)
             continuesAfterWrong = false
+            area = nil
         } else {
             return nil
         }
@@ -402,8 +407,10 @@ public final class ProblemEditorModel {
 
     /// 路上有一手已经答对（题目做完）或算不出来，后面就是自由下，不再判题。
     /// 答错以后，有引擎时接着陪下、接着判；入门判题器就停。
+    /// 有一手下到了题目区域外面，引擎算不了，也停，悔掉那手才接着判。
     private var isJudging: Bool {
         guard isJudgeEnabled, let judge else { return false }
+        if let area = judge.area, moves.contains(where: { $0.map { !area.contains($0) } ?? false }) { return false }
         return !tree.path.contains { id in
             switch verdicts[id] {
             case .solved?, .unknown?: true
@@ -515,10 +522,19 @@ public final class ProblemEditorModel {
 
     private func startJudging(_ node: Int) {
         guard let judge else { return }
+        let moves = self.moves
+        if let area = judge.area, case let p?? = moves.last, !area.contains(p) {
+            // 题目区域外引擎那边是外框，算不了，直接判错，不替对方应。
+            // 对杀题的区域只到棋子外面一路，可能比印出来的图小，这时说"太远了"。
+            verdicts[node] = .wrong
+            let printed = problem.region?.contains(p) ?? false
+            let text = printed ? "离题目里的棋子太远了，可以悔棋再试" : "下到题目外面了，可以悔棋再试"
+            finish(node, EditorMessage(text: text, tone: .warning))
+            return
+        }
         isThinking = true
         message = nil
         let position = tree.position
-        let moves = self.moves
         let delay = replyDelay
         let player = problem.toPlay
         let opponent = player.opponent.name

@@ -74,6 +74,11 @@ struct ScriptedEngine: GoEngine {
     func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis { answer(query) }
 }
 
+/// 一算就报错的引擎，用来确认没问引擎。
+struct FailingEngine: GoEngine {
+    func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis { throw .failed("不该问引擎") }
+}
+
 @Suite("引擎判题")
 struct EngineSolverTests {
     private let e2 = Point(4, 17)
@@ -109,6 +114,15 @@ struct EngineSolverTests {
     @Test("亏很多目算错")
     func wrong() async {
         #expect(await solver().judge([d2]) == .wrong)
+    }
+
+    @Test("下到题目区域外面直接算错，不问引擎（引擎那边那里是外框，不认这一手）")
+    func outsideArea() async {
+        let solver = EngineSolver(problem: .sample, engine: FailingEngine())
+        #expect(solver.isOutside(Point(0, 0)))
+        #expect(!solver.isOutside(e2))
+        #expect(await solver.judge([Point(0, 0)]) == .wrong)
+        #expect(await solver.judge([e2]) == .unknown)
     }
 
     @Test("下对以后对方只想停一手，题目就做完了")
