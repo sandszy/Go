@@ -57,6 +57,11 @@ public struct ProblemEditorView: View {
         .sheet(isPresented: $model.isChoosingDiagram) {
             DiagramChooser(model: model)
         }
+        .sheet(isPresented: $model.isShowingHomework) {
+            if let homework = model.homework {
+                HomeworkBook(homework: homework, onSelect: model.load)
+            }
+        }
     }
 
     private var panel: some View {

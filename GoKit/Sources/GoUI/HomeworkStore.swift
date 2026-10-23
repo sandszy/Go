@@ -1,0 +1,120 @@
+import CoreGraphics
+import Foundation
+import GoCore
+import ImageIO
+import Observation
+import UniformTypeIdentifiers
+
+/// 作业本里的一道题。拍照来的题还带着作业纸上那道题的原图。
+public struct SavedProblem: Codable, Identifiable, Hashable, Sendable {
+    public var problem: Problem
+    /// 第一次存进作业本的时间。校对后再存不改，按这个分到哪一天。
+    public var saved: Date
+    public var hasPhoto: Bool
+    /// 识别时发现这道题没拍全。
+    public var isIncomplete: Bool
+
+    public var id: UUID { problem.id }
+
+    public init(problem: Problem, saved: Date = .now, hasPhoto: Bool = false, isIncomplete: Bool = false) {
+        self.problem = problem
+        self.saved = saved
+        self.hasPhoto = hasPhoto
+        self.isIncomplete = isIncomplete
+    }
+}
+
+/// 作业本：每道题一个 `<id>.json`，原图存成同名的 `.jpg`，都在本机，不上传。
+@MainActor
+@Observable
+public final class HomeworkStore {
+    /// 新存的在前；同一天同一页的题按题号排。
+    public private(set) var problems: [SavedProblem] = []
+    private let directory: URL
+    @ObservationIgnored private var photos: [UUID: CGImage] = [:]
+
+    /// App 里用的位置：Application Support 下的“作业本”。
+    public static var defaultDirectory: URL {
+        URL.applicationSupportDirectory.appending(path: "作业本", directoryHint: .isDirectory)
+    }
+
+    public init(directory: URL) {
+        self.directory = directory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        let decoder = JSONDecoder()
+        // 读不了的文件（写到一半、版本不对）跳过，不让整个作业本打不开。
+        problems = files
+            .filter { $0.pathExtension == "json" }
+            .compactMap { try? Data(contentsOf: $0) }
+            .compactMap { try? decoder.decode(SavedProblem.self, from: $0) }
+        sort()
+    }
+
+    public func contains(_ id: UUID) -> Bool {
+        problems.contains { $0.id == id }
+    }
+
+    public subscript(id: UUID) -> SavedProblem? {
+        problems.first { $0.id == id }
+    }
+
+    /// 存一道题，同一个 id 的覆盖。带 photo 时把原图也存下来。
+    public func save(_ saved: SavedProblem, photo: CGImage? = nil) {
+        guard let data = try? JSONEncoder().encode(saved) else { return }
+        try? data.write(to: file(saved.id, "json"), options: .atomic)
+        if let photo, let jpeg = Self.jpeg(photo) {
+            try? jpeg.write(to: file(saved.id, "jpg"), options: .atomic)
+            photos[saved.id] = photo
+        }
+        problems.removeAll { $0.id == saved.id }
+        problems.append(saved)
+        sort()
+    }
+
+    /// 第一次用时放一道例题进作业本。只放一次，删了不再放回来。
+    public func addExampleOnce() {
+        let marker = directory.appending(path: ".例题已放")
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
+        var example = Problem.sample
+        example.title = "例题：\(example.title)"
+        save(SavedProblem(problem: example))
+        FileManager.default.createFile(atPath: marker.path, contents: nil)
+    }
+
+    public func delete(_ id: UUID) {
+        try? FileManager.default.removeItem(at: file(id, "json"))
+        try? FileManager.default.removeItem(at: file(id, "jpg"))
+        photos[id] = nil
+        problems.removeAll { $0.id == id }
+    }
+
+    /// 这道题在作业纸上的原图。
+    public func photo(for id: UUID) -> CGImage? {
+        if let cached = photos[id] { return cached }
+        guard self[id]?.hasPhoto == true,
+              let source = CGImageSourceCreateWithURL(file(id, "jpg") as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        photos[id] = image
+        return image
+    }
+
+    private func file(_ id: UUID, _ ext: String) -> URL {
+        directory.appending(path: "\(id.uuidString).\(ext)")
+    }
+
+    private func sort() {
+        problems.sort {
+            $0.saved != $1.saved
+                ? $0.saved > $1.saved
+                : $0.problem.title.localizedStandardCompare($1.problem.title) == .orderedAscending
+        }
+    }
+
+    private static func jpeg(_ image: CGImage) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
+    }
+}

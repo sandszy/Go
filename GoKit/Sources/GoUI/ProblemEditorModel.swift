@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import GoCore
 import GoVision
 import Observation
@@ -44,6 +45,24 @@ public enum SetupTool: String, CaseIterable, Identifiable, Sendable {
 public struct ScannedPage {
     public let image: CGImage
     public let page: RecognizedPage
+    /// 每道题（按 `RecognizedDiagram.id`）在作业本里的 id，选题时点进去的就是作业本里那一道。
+    public let problemIDs: [Int: UUID]
+}
+
+extension ScannedPage {
+    /// 这道题，id 用存进作业本时的那个。
+    func problem(for diagram: RecognizedDiagram) -> Problem {
+        var problem = page.problem(for: diagram)
+        problem.id = problemIDs[diagram.id] ?? problem.id
+        return problem
+    }
+}
+
+/// 当前这道题和作业本的关系。
+public enum SaveState: Sendable {
+    case unsaved
+    case modified
+    case saved
 }
 
 /// 给孩子看的提示，语气决定颜色。
@@ -194,6 +213,10 @@ public final class ProblemEditorModel {
     public private(set) var referenceImage: CGImage?
     /// 识别时没认准的点，校对时用橙色圈提醒。改过的点就不再提醒。
     public private(set) var uncertainPoints: Set<Point> = []
+    /// 为 true 时界面弹出作业本。
+    public var isShowingHomework = false
+    /// 没有时不存题，作业本按钮也不显示。
+    public let homework: HomeworkStore?
 
     private var nextAlternateStone: Stone = .black
     private let engine: (any GoEngine)?
@@ -204,10 +227,11 @@ public final class ProblemEditorModel {
     private var notes: [Int: EditorMessage] = [:]
     private var work: Task<Void, Never>?
 
-    /// engine 为 nil 时只用入门判题器。
-    public init(problem: Problem = .sample, engine: (any GoEngine)? = nil) {
+    /// engine 为 nil 时只用入门判题器；homework 为 nil 时不存题。
+    public init(problem: Problem = .sample, engine: (any GoEngine)? = nil, homework: HomeworkStore? = nil) {
         self.problem = problem
         self.engine = engine
+        self.homework = homework
         tree = GameTree(root: problem.startPosition)
     }
 
@@ -249,6 +273,12 @@ public final class ProblemEditorModel {
     /// 摆题时没有气的子，界面用红圈标出来。
     public var stonesWithoutLiberties: Set<Point> {
         Set(problem.setup.groupsWithoutLiberties.flatMap { $0 })
+    }
+
+    /// 当前这道题和作业本里的比：没存过、存过但改了、一样。
+    public var saveState: SaveState {
+        guard let saved = homework?[problem.id] else { return .unsaved }
+        return saved.problem == problem ? .saved : .modified
     }
 
     public var canUndo: Bool { mode == .solve && !isThinking && tree.canUndo }
@@ -294,6 +324,8 @@ public final class ProblemEditorModel {
         guard newMode != mode else { return }
         mode = newMode
         if newMode == .solve {
+            // 作业本里有这道题时，校对改过的地方跟着存回去。
+            if saveState == .modified { saveProblem() }
             restart()
         } else {
             cancelWork()
@@ -324,7 +356,9 @@ public final class ProblemEditorModel {
         }
     }
 
+    /// 清空或换棋盘大小后摆的是另一道题，不再覆盖作业本里原来那道。
     public func changeBoardSize(to size: Int) {
+        problem.id = UUID()
         problem.setup = Board(size: size)
         problem.labels = [:]
         problem.region = nil
@@ -359,7 +393,22 @@ public final class ProblemEditorModel {
             message = EditorMessage(text: "没找到棋盘图。换个角度、拍正一点再试，或者直接手动摆题", tone: .warning)
             return
         }
-        scannedPage = ScannedPage(image: image, page: page)
+        let scanned = ScannedPage(
+            image: image,
+            page: page,
+            problemIDs: Dictionary(uniqueKeysWithValues: page.diagrams.map { ($0.id, UUID()) })
+        )
+        scannedPage = scanned
+        // 拍下来的每道题都存进作业本，以后能再选。
+        if let homework {
+            let now = Date.now
+            for diagram in page.diagrams {
+                homework.save(
+                    SavedProblem(problem: scanned.problem(for: diagram), saved: now, hasPhoto: true, isIncomplete: diagram.isIncomplete),
+                    photo: PhotoLoader.crop(image, to: diagram.bounds)
+                )
+            }
+        }
         if page.diagrams.count == 1 {
             loadDiagram(page.diagrams[0].id)
         } else {
@@ -371,7 +420,7 @@ public final class ProblemEditorModel {
     public func loadDiagram(_ id: Int) {
         guard let scanned = scannedPage, let diagram = scanned.page.diagrams.first(where: { $0.id == id }) else { return }
         switchMode(to: .setup)
-        problem = scanned.page.problem(for: diagram)
+        problem = scanned.problem(for: diagram)
         referenceImage = PhotoLoader.crop(scanned.image, to: diagram.bounds)
         uncertainPoints = Set(diagram.uncertain.map(diagram.boardPoint))
         tool = .cycle
@@ -381,6 +430,27 @@ public final class ProblemEditorModel {
         } else {
             message = EditorMessage(text: "对照原图检查一下棋子，摆错的地方点一下就能改", tone: .info)
         }
+    }
+
+    /// 把当前这道题存进作业本，已经存过的覆盖，第一次存的日期和原图不变。
+    public func saveProblem() {
+        guard let homework else { return }
+        if var saved = homework[problem.id] {
+            saved.problem = problem
+            homework.save(saved)
+        } else {
+            homework.save(SavedProblem(problem: problem, hasPhoto: referenceImage != nil), photo: referenceImage)
+        }
+    }
+
+    /// 从作业本里选一道放到棋盘上，和拍照导入一样先进摆题模式，有原图就对照着看。
+    public func load(_ saved: SavedProblem) {
+        switchMode(to: .setup)
+        problem = saved.problem
+        referenceImage = homework?.photo(for: saved.id)
+        uncertainPoints = []
+        isShowingHomework = false
+        message = EditorMessage(text: "从作业本里拿出了\(saved.problem.title.isEmpty ? "这道题" : saved.problem.title)，点“做题”开始", tone: .info)
     }
 
     /// 判题时，App 替对方下的那手跟着一起退回，回到孩子自己的回合。

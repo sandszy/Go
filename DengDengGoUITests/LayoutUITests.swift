@@ -10,8 +10,8 @@ final class LayoutUITests: XCTestCase {
     func testLandscapePutsPanelBesideBoard() {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
-        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。
-        app.launchArguments = ["-katagoHardware", "off"]
+        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。直接摆上例题。
+        app.launchArguments = ["-katagoHardware", "off", "-sampleProblem"]
         app.launch()
 
         let board = boardElement(in: app)
@@ -30,8 +30,8 @@ final class LayoutUITests: XCTestCase {
     func testPortraitPutsPanelBelowBoard() {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
-        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。
-        app.launchArguments = ["-katagoHardware", "off"]
+        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。直接摆上例题。
+        app.launchArguments = ["-katagoHardware", "off", "-sampleProblem"]
         app.launch()
 
         let board = boardElement(in: app)
@@ -46,8 +46,8 @@ final class LayoutUITests: XCTestCase {
     func testMoveMessageVisibleWithoutScrollingInPortrait() {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
-        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。
-        app.launchArguments = ["-katagoHardware", "off"]
+        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。直接摆上例题。
+        app.launchArguments = ["-katagoHardware", "off", "-sampleProblem"]
         app.launch()
         app.buttons["做题"].tap()
 
@@ -67,8 +67,8 @@ final class LayoutUITests: XCTestCase {
     func testSampleProblemJudgesCorrectAnswer() {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
-        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。
-        app.launchArguments = ["-katagoHardware", "off"]
+        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。直接摆上例题。
+        app.launchArguments = ["-katagoHardware", "off", "-sampleProblem"]
         app.launch()
         app.buttons["做题"].tap()
 

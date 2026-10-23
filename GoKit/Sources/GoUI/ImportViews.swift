@@ -48,6 +48,29 @@ struct ImportControls: View {
                 }
                 .buttonStyle(.bordered)
             }
+
+            if model.homework != nil {
+                HStack(spacing: 12) {
+                    Button {
+                        model.isShowingHomework = true
+                    } label: {
+                        Label("作业本", systemImage: "books.vertical")
+                    }
+                    switch model.saveState {
+                    case .unsaved, .modified:
+                        Button {
+                            model.saveProblem()
+                        } label: {
+                            Label(model.saveState == .unsaved ? "保存这道题" : "保存修改", systemImage: "square.and.arrow.down")
+                        }
+                        .disabled(model.problem.setup.isEmpty)
+                    case .saved:
+                        Label("已存进作业本", systemImage: "checkmark")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
         }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
