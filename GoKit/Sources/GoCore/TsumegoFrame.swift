@@ -20,12 +20,12 @@ public struct TsumegoFrame: Sendable {
 
         let wall = Self.wallColor(for: problem)
         switch problem.goal {
-        case .capturingRace, .connect, .cut, nil:
+        case .capturingRace:
             // 对杀等题的外框贴着棋子外面一路摆。题目里没子的空地留着的话，引擎觉得去那里占地比对杀划算；
             // 输的一方也会往空地里跑，拖着孩子一路追。
             // 吃子、逃子、做活、杀棋题不这样收紧：能不能跑出去、做不做得出眼，和外面有多少空地有关。
             area = BoardRegion.fitting(setup, margin: 1, snap: 1, minSpan: 1)
-        case .capture, .escape, .live, .kill:
+        case .capture, .escape:
             break
         }
         let sides = Self.sideColors(for: problem, area: area)
@@ -65,16 +65,14 @@ public struct TsumegoFrame: Sendable {
     /// 紧贴题目区域的外框用哪种颜色。
     ///
     /// 子跑到区域边上就和这种颜色的外框连上了，所以要看谁"跑出去"算成功：
-    /// 逃子题是做题方，吃子题是被吃的一方，做活题是杀棋方（活棋要在里面做眼），杀棋题是做题方。
-    /// 对杀等其他题看哪方的子离棋盘边更远：在外面包围的一方子更靠中间（KaTrain、Lizgoban 的死活外框也这样猜）。
+    /// 逃子、杀棋题是做题方（杀棋时做题方在外面包围），吃子、做活题是对方（做活时对方在外面包围）。
+    /// 对杀等题看哪方的子离棋盘边更远：在外面包围的一方子更靠中间（KaTrain、Lizgoban 的死活外框也这样猜）。
     public static func wallColor(for problem: Problem) -> Stone {
         let me = problem.toPlay
         switch problem.goal {
         case .escape: return me
         case .capture: return me.opponent
-        case .live: return me.opponent
-        case .kill: return me
-        case .capturingRace, .connect, .cut, nil:
+        case .capturingRace:
             let setup = problem.setup
             let last = setup.size - 1
             var balance = 0
@@ -92,15 +90,12 @@ public struct TsumegoFrame: Sendable {
         case top, bottom, left, right
     }
 
-    /// 对杀、连接、切断和没设目标的题，外框每条边各用离那条边最近的子的颜色：
+    /// 对杀、连接、切断题，外框每条边各用离那条边最近的子的颜色：
     /// 题目上边是黑子、右边是白子时，上边摆黑框、右边摆白框，两边在外面的子都算活的，只剩题目里的对杀。
     /// 整个外框只用一种颜色的话，另一方在外面的子会被外框围住，引擎就去救它们，不管题目了。
     /// 各边颜色都一样时返回 nil，按 wallColor 摆。吃子、逃子、做活、杀棋题看题目要谁跑出去，也返回 nil。
     static func sideColors(for problem: Problem, area: BoardRegion) -> [Side: Stone]? {
-        switch problem.goal {
-        case .capture, .escape, .live, .kill: return nil
-        case .capturingRace, .connect, .cut, nil: break
-        }
+        guard problem.goal == .capturingRace else { return nil }
         let setup = problem.setup
         let last = setup.size - 1
         let fallback = wallColor(for: problem)

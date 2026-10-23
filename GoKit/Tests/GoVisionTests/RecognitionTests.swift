@@ -124,7 +124,7 @@ struct RecognitionTests {
         ]
         let found = try #require(try PageRecognizer.recognize(drawDiagram(rows, edges: [.top, .right])).diagrams.first)
         #expect(found.edges == [.top, .right])
-        let problem = found.problem(title: "", toPlay: .black, goal: nil)
+        let problem = found.problem(title: "", toPlay: .black, goal: .capturingRace)
         #expect(problem.setup[Point(16, 1)] == .black)
         #expect(problem.setup[Point(17, 1)] == .white)
         #expect(problem.setup[Point(17, 2)] == .white)
@@ -138,6 +138,12 @@ struct RecognitionTests {
         ]
         #expect(TextReader.toPlay(in: items) == .black)
         #expect(TextReader.goal(in: items) == .capturingRace)
+        // 七种题型按外框的摆法归成三种。
+        func goal(_ text: String) -> ProblemGoal? { TextReader.goal(in: [TextItem(text: text, box: .zero)]) }
+        #expect(goal("黑先做活") == .capture)
+        #expect(goal("黑先杀白") == .escape)
+        #expect(goal("切断") == .capturingRace)
+        #expect(goal("黑先") == nil)
         #expect(TextReader.number(in: "⑦") == 7)
         #expect(TextReader.number(in: " 12 ") == 12)
         #expect(TextReader.number(in: "4-2") == nil)

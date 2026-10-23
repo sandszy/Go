@@ -43,15 +43,16 @@ enum TextReader {
     }
 
     /// 从标题和说明里的关键词猜题目类型。"对杀"要先于"杀"判断。
+    /// 作业纸上的七种题型按外框的摆法归成三种：做活和吃子一样，杀棋和逃子一样，连接、切断和对杀一样。
     static func goal(in items: [TextItem]) -> ProblemGoal? {
         let all = items.map(\.text).joined()
         let keywords: [(String, ProblemGoal)] = [
             ("对杀", .capturingRace),
-            ("做活", .live),
-            ("杀", .kill),
+            ("做活", .capture),
+            ("杀", .escape),
             ("逃", .escape),
             ("征", .capture), ("枷", .capture), ("吃", .capture), ("提", .capture),
-            ("连接", .connect), ("切断", .cut),
+            ("连接", .capturingRace), ("切断", .capturingRace),
         ]
         return keywords.first { all.contains($0.0) }?.1
     }

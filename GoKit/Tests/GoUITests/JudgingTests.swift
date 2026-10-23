@@ -3,6 +3,21 @@ import GoCore
 import Testing
 @testable import GoUI
 
+/// 第 7 题的假引擎：开头黑棋领先 10 目、最想下 E2；黑 E2 以后白最想下 F1，黑照样领先 10 目；
+/// 黑 D2 以后白最想下 E2，白反过来领先 5 目。别的局面不分胜负，想停一手。
+struct SampleEngine: GoEngine {
+    func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis {
+        let e2 = Point(4, 17), d2 = Point(3, 17), f1 = Point(5, 18)
+        let (score, best): (Double, Point?) = switch query.moves {
+        case []: (10, e2)
+        case [e2]: (-10, f1)
+        case [d2]: (5, e2)
+        default: (0, nil)
+        }
+        return EngineAnalysis(candidates: [.init(move: best, visits: 100, winrate: 0.5, scoreLead: score)], winrate: 0.5, scoreLead: score, ownership: [])
+    }
+}
+
 /// 用第 7 题检查做题时的自动判题：正解 E2，D2 会被白棋破解。
 @MainActor
 @Suite("做题判对错")
@@ -11,7 +26,7 @@ struct JudgingTests {
     private let d2 = Point(3, 17)
 
     private func solvingModel() -> ProblemEditorModel {
-        let model = ProblemEditorModel(problem: .sample)
+        let model = ProblemEditorModel(problem: .sample, engine: SampleEngine())
         model.replyDelay = .zero
         model.confirmMoves = false
         model.switchMode(to: .solve)
@@ -29,20 +44,20 @@ struct JudgingTests {
         #expect(!model.isThinking)
     }
 
-    @Test("下错了：提示不对，白棋应出破解的一手，后面不再判")
+    @Test("下错了：提示不对，白棋应出破解的一手，接着陪下")
     func wrongMove() async {
         let model = solvingModel()
         model.tap(d2)
         await model.waitUntilIdle()
         #expect(model.message?.tone == .warning)
+        #expect(model.message?.text == "不对哦，看白棋这样应。可以悔棋再试，也可以接着下")
+        #expect(model.lastMove == e2)
         #expect(model.position.toPlay == .black)
 
-        // 判完以后是自由下：黑白轮流，白棋不再自动应。
-        let before = model.tree.path.count
-        model.tap(Point(0, 18))
+        // 接着下也照样判。假引擎看后面的局面都定了，这一手就算答对。
+        model.tap(Point(1, 17))
         await model.waitUntilIdle()
-        #expect(model.tree.path.count == before + 1)
-        #expect(model.position.toPlay == .white)
+        #expect(model.message?.text == "答对了！")
     }
 
     @Test("关掉 AI 陪下：自己两边下，白棋不自动应；再打开，AI 先判刚下的那手再应")
@@ -136,13 +151,26 @@ struct JudgingTests {
         #expect(model.message == nil)
     }
 
-    @Test("摆题时告诉家长判题目标")
-    func judgeSummary() {
+    @Test("没有判题引擎：不判，AI 陪下用不了，自己两边下")
+    func withoutEngine() async {
         let model = ProblemEditorModel(problem: .sample)
-        #expect(model.judgeSummary == "判题：吃掉白棋 3 子")
-        model.problem.goal = .live
-        #expect(model.judgeSummary == "做活题暂时不能自动判对错")
         #expect(!model.canJudge)
+        #expect(!model.hasEngine)
+        #expect(model.judgeSummary == "没有判题引擎，只能自己两边下")
+        model.confirmMoves = false
+        model.switchMode(to: .solve)
+        model.tap(e2)
+        await model.waitUntilIdle()
+        #expect(model.position.toPlay == .white)
+        #expect(model.message == nil)
+    }
+
+    @Test("题目类型的说明跟着谁先下换颜色")
+    func goalExplanation() {
+        #expect(ProblemGoal.capture.explanation(player: .black) == "外面都算白棋：白子跑到外面就逃掉了，黑子跑不出去，要在里面做活。")
+        #expect(ProblemGoal.capture.explanation(player: .white).hasPrefix("外面都算黑棋"))
+        #expect(ProblemGoal.escape.explanation(player: .black).hasPrefix("外面都算黑棋"))
+        #expect(ProblemGoal.allCases.map(\.name) == ["对杀、连接、切断", "吃子、做活", "逃子、杀棋"])
     }
 }
 
@@ -155,14 +183,12 @@ struct EngineJudgingTests {
         func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis { throw .unavailable("测试") }
     }
 
-    @Test("判题说明里有引擎的名字，没设题目目标也能判")
+    @Test("判题说明里有引擎的名字；空棋盘不判")
     func summaryNamesEngine() {
-        var problem = Problem.sample
-        problem.goal = nil
-        let model = ProblemEditorModel(problem: problem, engine: NamedEngine())
+        let model = ProblemEditorModel(problem: .sample, engine: NamedEngine())
         #expect(model.canJudge)
         #expect(model.judgeSummary.contains("KataGo（CPU）"))
-        #expect(!ProblemEditorModel(problem: problem).canJudge)
+        #expect(!ProblemEditorModel(problem: Problem(), engine: NamedEngine()).canJudge)
     }
 
     private func solvingModel(_ problem: Problem = .sample) -> ProblemEditorModel {

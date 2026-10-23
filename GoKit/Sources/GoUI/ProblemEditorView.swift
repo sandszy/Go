@@ -130,13 +130,16 @@ public struct ProblemEditorView: View {
                 .frame(width: 140)
             }
 
-            LabeledContent("题目目标") {
-                Picker("题目目标", selection: $model.problem.goal) {
-                    Text("未设置").tag(ProblemGoal?.none)
-                    ForEach(ProblemGoal.allCases) { Text($0.name).tag(Optional($0)) }
+            LabeledContent("题目类型") {
+                Picker("题目类型", selection: $model.problem.goal) {
+                    ForEach(ProblemGoal.allCases) { Text($0.name).tag($0) }
                 }
                 .labelsHidden()
             }
+            Text(model.problem.goal.explanation(player: model.problem.toPlay))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(model.judgeSummary)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -185,11 +188,9 @@ public struct ProblemEditorView: View {
                     .font(.title2.weight(.bold))
             }
 
-            if let goal = model.problem.goal {
-                Text("\(model.problem.toPlay.name)先 · \(goal.name)")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
+            Text("\(model.problem.toPlay.name)先")
+                .font(.title3)
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
                 Button {
@@ -234,7 +235,7 @@ public struct ProblemEditorView: View {
                     : "自己两边下，随时可以再打开")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                if model.autoJudge && model.hasEngine {
+                if model.autoJudge {
                     Picker("思考深度", selection: $storedDepth) {
                         ForEach(EngineDepth.allCases, id: \.self) { depth in
                             Text(depth.name).tag(depth)
@@ -245,6 +246,10 @@ public struct ProblemEditorView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+            } else if !model.hasEngine {
+                Text(model.judgeSummary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Toggle("落子前确认", isOn: $model.confirmMoves)
             if model.confirmMoves {

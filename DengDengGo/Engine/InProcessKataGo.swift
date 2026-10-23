@@ -13,7 +13,7 @@ struct InProcessKataGo: KataGoTransport {
         case cpu = "CPU"
 
         /// 有能用的 GPU 就用 GPU，快得多；模拟器的虚拟 GPU 不支持 KataGo Metal 后端用的 MPSGraph，一算就崩，只能用 CPU。
-        /// 启动参数 `-katagoHardware cpu` 或 `gpu` 可以强制指定，`off` 不用引擎（UI 测试用，判题快、结果固定）。
+        /// 启动参数 `-katagoHardware cpu` 或 `gpu` 可以强制指定，`off` 不用引擎，不判题（UI 测试用，结果固定）。
         /// 返回 nil 表示不用引擎。
         static var preferred: Hardware? {
             let arguments = ProcessInfo.processInfo.arguments
@@ -42,7 +42,7 @@ struct InProcessKataGo: KataGoTransport {
         }
     }
 
-    /// 整个 App 共用一个引擎：KataGo 在进程里只能启动一次。模型没打包进来时是 nil，App 就只用入门判题器。
+    /// 整个 App 共用一个引擎：KataGo 在进程里只能启动一次。模型没打包进来时是 nil，App 不判题，只能自己两边下。
     static let shared: KataGoEngine? = makeEngine()
 
     private static func makeEngine() -> KataGoEngine? {

@@ -1,7 +1,18 @@
+/// 做题一方下完一手后的判断。
+public enum Verdict: Sendable, Equatable {
+    /// 目标已经达成：吃掉了，或者逃出来了。
+    case solved
+    /// 这一手对，题目还没做完。
+    case correct
+    /// 这一手不对。
+    case wrong
+    /// 引擎出错，算不出来。
+    case unknown
+}
+
 /// 用围棋引擎判题：题目外面摆上外框，比较孩子下的这一手和引擎认为最好的一手差多少目。
 ///
-/// 和 ProblemSolver 不同，这里不需要知道"要吃哪块"，做活、杀棋、连接、切断都能判；
-/// 只要这一手比最好的下法亏得不多，就算对。
+/// 不需要知道"要吃哪块"，做活、杀棋、连接、切断都能判；只要这一手比最好的下法亏得不多，就算对。
 public actor EngineSolver {
     public nonisolated let frame: TsumegoFrame
     private let problem: Problem

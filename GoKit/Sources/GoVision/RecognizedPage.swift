@@ -103,7 +103,7 @@ public struct RecognizedDiagram: Identifiable, Sendable {
         return Point(x + p.column, y + p.row)
     }
 
-    public func problem(title: String, toPlay: Stone, goal: ProblemGoal?) -> Problem {
+    public func problem(title: String, toPlay: Stone, goal: ProblemGoal) -> Problem {
         let (size, x0, y0) = placement
         var board = Board(size: size)
         for row in 0..<rows {
@@ -129,7 +129,7 @@ public struct RecognizedPage: Sendable {
     public var diagrams: [RecognizedDiagram]
     /// 页面上写的"黑先"或"白先"。
     public var toPlay: Stone?
-    /// 从页面标题和说明猜的题目类型，比如"对杀"。
+    /// 从页面标题和说明猜的题目类型，比如"对杀"。没认出来时是 nil，题目按默认的对杀摆外框。
     public var goal: ProblemGoal?
     public var pageNumber: Int?
 
@@ -157,6 +157,6 @@ public struct RecognizedPage: Sendable {
     }
 
     public func problem(for diagram: RecognizedDiagram) -> Problem {
-        diagram.problem(title: title(for: diagram), toPlay: toPlay ?? .black, goal: goal)
+        diagram.problem(title: title(for: diagram), toPlay: toPlay ?? .black, goal: goal ?? .capturingRace)
     }
 }

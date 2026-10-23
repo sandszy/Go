@@ -78,6 +78,23 @@ struct HomeworkTests {
         #expect(reopened.problems.isEmpty)
     }
 
+    @Test("以前存的题照常读：七种题型读成三种，没写题型的是对杀")
+    func readsOldGoals() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoded = try JSONEncoder().encode(SavedProblem(problem: .sample))
+        let json = try #require(String(data: encoded, encoding: .utf8))
+        let expected: [String?: ProblemGoal] = ["live": .capture, "kill": .escape, "connect": .capturingRace, "capture": .capture, nil: .capturingRace]
+        for (old, _) in expected {
+            let id = UUID()
+            var text = json.replacingOccurrences(of: Problem.sample.id.uuidString, with: id.uuidString)
+            text = text.replacingOccurrences(of: #""goal":"capturingRace""#, with: old.map { #""goal":"\#($0)""# } ?? #""goal":null"#)
+            try Data(text.utf8).write(to: directory.appending(path: "\(id.uuidString).json"))
+        }
+        let goals = HomeworkStore(directory: directory).problems.map(\.problem.goal)
+        #expect(goals.count == expected.count)
+        #expect(goals.sorted { $0.rawValue < $1.rawValue } == expected.values.sorted { $0.rawValue < $1.rawValue })
+    }
+
     @Test("读不了的文件跳过")
     func skipsBrokenFiles() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

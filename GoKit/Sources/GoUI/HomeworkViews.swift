@@ -79,7 +79,7 @@ struct HomeworkBook: View {
     }
 }
 
-/// 作业本里的一行：小棋盘、题目名和题型。
+/// 作业本里的一行：小棋盘、题目名和谁先下。
 private struct HomeworkRow: View {
     let saved: SavedProblem
 
@@ -91,7 +91,7 @@ private struct HomeworkRow: View {
                 .allowsHitTesting(false)
             VStack(alignment: .leading, spacing: 4) {
                 Text(name(of: problem)).font(.headline)
-                Text(["\(problem.toPlay.name)先", problem.goal?.name].compactMap { $0 }.joined(separator: " · "))
+                Text("\(problem.toPlay.name)先")
                     .foregroundStyle(.secondary)
                 if saved.isIncomplete {
                     Text("没拍全").font(.footnote).foregroundStyle(.orange)

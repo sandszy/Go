@@ -10,7 +10,7 @@ final class LayoutUITests: XCTestCase {
     func testLandscapePutsPanelBesideBoard() {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
-        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。直接摆上例题。
+        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面。直接摆上例题。
         app.launchArguments = ["-katagoHardware", "off", "-sampleProblem"]
         app.launch()
 
@@ -30,7 +30,7 @@ final class LayoutUITests: XCTestCase {
     func testPortraitPutsPanelBelowBoard() {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
-        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。直接摆上例题。
+        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面。直接摆上例题。
         app.launchArguments = ["-katagoHardware", "off", "-sampleProblem"]
         app.launch()
 
@@ -46,7 +46,7 @@ final class LayoutUITests: XCTestCase {
     func testMoveMessageVisibleWithoutScrollingInPortrait() {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
-        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。直接摆上例题。
+        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面。直接摆上例题。
         app.launchArguments = ["-katagoHardware", "off", "-sampleProblem"]
         app.launch()
         app.buttons["做题"].tap()
@@ -62,26 +62,25 @@ final class LayoutUITests: XCTestCase {
         attachScreenshot(named: "竖屏-提示")
     }
 
-    /// 第 7 题：下 E2（左数第 5 列、下数第 2 行）判为答对，白棋自动应一手。
+    /// 第 7 题：下 E2（左数第 5 列、下数第 2 行），子落上去，轮到白棋。不用引擎时不判题，自己两边下。
     @MainActor
-    func testSampleProblemJudgesCorrectAnswer() {
+    func testSampleProblemPlaysMove() {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
-        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和做题流程。直接摆上例题。
+        // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面和下棋流程。直接摆上例题。
         app.launchArguments = ["-katagoHardware", "off", "-sampleProblem"]
         app.launch()
         app.buttons["做题"].tap()
 
         let board = boardElement(in: app)
         XCTAssertTrue(board.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["没有判题引擎，只能自己两边下"].exists)
         let e2 = board.coordinate(withNormalizedOffset: CGVector(dx: 4.75 / 9.5, dy: 5.75 / 7.5))
         e2.tap()
         e2.tap()
 
-        let praise = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "下得好")).firstMatch
-        XCTAssertTrue(praise.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["轮到黑棋下"].waitForExistence(timeout: 5))
-        attachScreenshot(named: "横屏-答对")
+        XCTAssertTrue(app.staticTexts["轮到白棋下"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "横屏-下了一手")
     }
 
     @MainActor
