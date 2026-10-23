@@ -6,8 +6,12 @@ public actor EngineSolver {
     public nonisolated let frame: TsumegoFrame
     private let problem: Problem
     private let engine: any GoEngine
-    private let visits: Int
+    private var depth: EngineDepth
     private var analyses: [[Point?]: Task<EngineAnalysis, any Error>] = [:]
+    /// 孩子还在想时猜着提前算的局面。孩子下了别处，这些就停掉。
+    private var guesses: Set<[Point?]> = []
+    /// 正等着孩子下的局面。孩子已经下了，就不用再猜这个局面之后的手。
+    private var awaiting: [Point?]?
     private var keyStones: [Point: KeyStone]?
 
     /// 题目要分死活的一个子。
@@ -29,18 +33,26 @@ public actor EngineSolver {
     static let contested = 0.6
     /// 做题方连着下对这么多手还没做完，也算答对，免得一直下下去。
     static let maxMoves = 15
+    /// 轮到孩子时，猜孩子会下引擎最想下的这几手，提前算好。
+    static let guessCount = 3
 
-    public init(problem: Problem, engine: any GoEngine, visits: Int = 400) {
+    public init(problem: Problem, engine: any GoEngine, depth: EngineDepth = .standard) {
         self.problem = problem
         self.engine = engine
-        self.visits = visits
+        self.depth = depth
         frame = TsumegoFrame(problem: problem)
+    }
+
+    /// 换一个想的深度，从下一个要算的局面开始用；已经算好的照样用。
+    public func setDepth(_ depth: EngineDepth) {
+        self.depth = depth
     }
 
     /// moves 是从题目开始下的每一手，最后一手是做题一方刚下的。
     public func judge(_ moves: [Point?]) async -> Verdict {
         guard let last = moves.last else { return .unknown }
         if let p = last, isOutside(p) { return .wrong }
+        dropGuesses(except: moves)
         guard let before = try? await analysis(Array(moves.dropLast())),
               let after = try? await analysis(moves)
         else { return .unknown }
@@ -66,10 +78,13 @@ public actor EngineSolver {
     }
 
     /// 提前算好这个局面，孩子想下一手的时候引擎就在算了。
+    /// 算完再猜孩子会下的几手，也提前算好：猜中了，孩子一下完就能判、对方马上应。
     public func prepare(_ moves: [Point?]) {
-        _ = task(for: moves)
+        let current = task(for: moves)
+        awaiting = moves
         // 开头还要算"做题方停一手"，用来找题目要分死活的子。
         if moves.isEmpty { _ = task(for: [nil]) }
+        Task { await guess(after: moves, current) }
     }
 
     /// 引擎在题目区域里最想下的一手（不算停一手）。以后做提示用；自测里在"最好是停一手"时
@@ -129,17 +144,44 @@ public actor EngineSolver {
         }
     }
 
-    private func task(for moves: [Point?]) -> Task<EngineAnalysis, any Error> {
+    /// guess 为 true 是猜着提前算的，让给别的请求先算。
+    private func task(for moves: [Point?], guess: Bool = false) -> Task<EngineAnalysis, any Error> {
         if let task = analyses[moves] { return task }
         let current = position(after: moves)?.board ?? frame.board
         let query = EngineQuery(
-            board: frame.board, firstPlayer: problem.toPlay, moves: moves, komi: frame.komi, maxVisits: visits,
-            avoid: avoidedPoints(after: moves, on: current)
+            board: frame.board, firstPlayer: problem.toPlay, moves: moves, komi: frame.komi, maxVisits: depth.visits,
+            avoid: avoidedPoints(after: moves, on: current), priority: guess ? -1 : 0
         )
         let engine = engine
         let task = Task { () async throws -> EngineAnalysis in try await engine.analyze(query) }
         analyses[moves] = task
         return task
+    }
+
+    /// 等 moves 这个局面算完，按引擎最想下的几手提前算孩子下完以后的局面。
+    private func guess(after moves: [Point?], _ current: Task<EngineAnalysis, any Error>) async {
+        guard let analysis = try? await current.value, awaiting == moves, let best = analysis.candidates.first else { return }
+        let likely = analysis.candidates.lazy
+            .filter { $0.visits * 10 >= best.visits }
+            .compactMap(\.move)
+            .filter { self.frame.area.contains($0) }
+            .prefix(Self.guessCount)
+        for move in likely {
+            let next = moves + [move]
+            guard analyses[next] == nil else { continue }
+            _ = task(for: next, guess: true)
+            guesses.insert(next)
+        }
+    }
+
+    /// 孩子下了 moves，别的猜测都用不上了，停掉，引擎专心算孩子在等的这个。
+    private func dropGuesses(except moves: [Point?]) {
+        for guess in guesses where guess != moves {
+            analyses[guess]?.cancel()
+            analyses[guess] = nil
+        }
+        guesses = []
+        awaiting = nil
     }
 
     /// 搜索时双方都不下的点。

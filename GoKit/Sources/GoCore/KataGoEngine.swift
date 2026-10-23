@@ -24,16 +24,22 @@ public final class KataGoEngine: GoEngine, @unchecked Sendable {
     }
 
     public func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis {
+        let id: String = lock.withLock {
+            nextID += 1
+            return String(nextID)
+        }
         do {
-            return try await withCheckedThrowingContinuation { continuation in
-                let id: String = lock.withLock {
-                    nextID += 1
-                    let id = String(nextID)
-                    waiting[id] = continuation
-                    sizes[id] = query.board.size
-                    return id
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    lock.withLock {
+                        waiting[id] = continuation
+                        sizes[id] = query.board.size
+                    }
+                    transport.send(KataGoProtocol.request(id: id, query: query))
                 }
-                transport.send(KataGoProtocol.request(id: id, query: query))
+            } onCancel: { [transport] in
+                // 不用了的请求让引擎停下，把算力让给孩子正在等的那个。引擎停下以后照样回一行，等着的那边就结束了。
+                transport.send(KataGoProtocol.terminate(id: id))
             }
         } catch let error as EngineError {
             throw error
@@ -79,6 +85,12 @@ public enum KataGoProtocol {
         case error(id: String?, message: String)
     }
 
+    static func terminate(id: String) -> String {
+        let object = ["id": "停-\(id)", "action": "terminate", "terminateId": id]
+        let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
     static func request(id: String, query: EngineQuery) -> String {
         let size = query.board.size
         let stones: [[String]] = query.board.occupiedPoints.map { p in
@@ -104,6 +116,9 @@ public enum KataGoProtocol {
             "maxVisits": query.maxVisits,
             "includeOwnership": true,
         ]
+        if query.priority != 0 {
+            object["priority"] = query.priority
+        }
         if !query.avoid.isEmpty {
             let points = query.avoid.map { vertex($0, size: size) }
             // untilDepth 给得足够大，整个搜索里都不下这些点。
@@ -120,6 +135,8 @@ public enum KataGoProtocol {
         else { return nil }
         let id = json["id"] as? String
         if let message = json["error"] as? String { return .error(id: id, message: message) }
+        // 请求还没开始算就被停下了，引擎回一行空的结果。
+        if let id, json["noResults"] as? Bool == true { return .error(id: id, message: "引擎停下了，没有结果") }
         guard let id, json["moveInfos"] != nil, json["isDuringSearch"] as? Bool != true else { return nil }
         return .analysis(id: id, json: json)
     }

@@ -57,6 +57,32 @@ struct KataGoProtocolTests {
         #expect(KataGoProtocol.parse(#"{"id":"1","isDuringSearch":true,"moveInfos":[]}"#) == nil)
     }
 
+    @Test("请求带上优先级；不给就不写")
+    func priority() throws {
+        func json(_ query: EngineQuery) throws -> [String: Any] {
+            try JSONSerialization.jsonObject(with: Data(KataGoProtocol.request(id: "1", query: query).utf8)) as! [String: Any]
+        }
+        let plain = try json(EngineQuery(board: Board(size: 19), firstPlayer: .black, komi: 6.5, maxVisits: 10))
+        #expect(plain["priority"] == nil)
+        let guessed = try json(EngineQuery(board: Board(size: 19), firstPlayer: .black, komi: 6.5, maxVisits: 10, priority: -1))
+        #expect(guessed["priority"] as? Int == -1)
+    }
+
+    @Test("不用的请求让引擎停下，等着的一方收到失败")
+    func terminate() async throws {
+        // 这个假引擎只回停下的命令：被停下的请求回一行空结果。
+        let transport = FakeTransport { request in
+            guard request["action"] as? String == "terminate", let id = request["terminateId"] as? String else { return "{}" }
+            return #"{"id":"\#(id)","isDuringSearch":false,"noResults":true}"#
+        }
+        let engine = KataGoEngine(transport: transport)
+        let task = Task { try await engine.analyze(EngineQuery(board: Board(size: 19), firstPlayer: .black, komi: 6.5, maxVisits: 10)) }
+        while transport.requests.isEmpty { await Task.yield() }
+        task.cancel()
+        await #expect(throws: EngineError.self) { try await task.value }
+        #expect(transport.requests.last?["terminateId"] as? String == transport.requests.first?["id"] as? String)
+    }
+
     @Test("引擎报错时请求失败")
     func error() async {
         let engine = KataGoEngine(transport: FakeTransport { request in
@@ -72,6 +98,32 @@ struct KataGoProtocolTests {
 struct ScriptedEngine: GoEngine {
     var answer: @Sendable (EngineQuery) -> EngineAnalysis
     func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis { answer(query) }
+}
+
+/// 记下收到的每个请求，再交给 answer 回答。
+final class RecordingEngine: GoEngine, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [EngineQuery] = []
+    private let answer: @Sendable (EngineQuery) -> EngineAnalysis
+
+    init(answer: @escaping @Sendable (EngineQuery) -> EngineAnalysis) { self.answer = answer }
+
+    var queries: [EngineQuery] { lock.withLock { recorded } }
+
+    func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis {
+        lock.withLock { recorded.append(query) }
+        return answer(query)
+    }
+
+    /// 等到收到满足条件的请求，最多等一秒。
+    func waitFor(_ condition: (EngineQuery) -> Bool) async -> EngineQuery? {
+        let deadline = ContinuousClock.now + .seconds(1)
+        while ContinuousClock.now < deadline {
+            if let query = queries.first(where: condition) { return query }
+            await Task.yield()
+        }
+        return nil
+    }
 }
 
 /// 一算就报错的引擎，用来确认没问引擎。
@@ -123,6 +175,45 @@ struct EngineSolverTests {
         #expect(!solver.isOutside(e2))
         #expect(await solver.judge([Point(0, 0)]) == .wrong)
         #expect(await solver.judge([e2]) == .unknown)
+    }
+
+    @Test("每个局面按档位算多少次，中途换档从下一个局面开始用")
+    func depth() async {
+        let e2 = e2, f1 = f1
+        let engine = RecordingEngine { query in
+            query.moves.isEmpty ? self.analysis(10, best: e2) : self.analysis(-10, best: f1)
+        }
+        let solver = EngineSolver(problem: .sample, engine: engine, depth: .quick)
+        _ = await solver.judge([e2])
+        #expect(engine.queries.allSatisfy { $0.maxVisits == EngineDepth.quick.visits })
+
+        await solver.setDepth(.deep)
+        _ = await solver.reply([e2, f1, Point(2, 17)])
+        #expect(engine.queries.last?.maxVisits == EngineDepth.deep.visits)
+    }
+
+    @Test("轮到孩子时，猜孩子会下引擎最想下的几手，用低优先级提前算好")
+    func guesses() async {
+        let e2 = e2, d2 = d2
+        let engine = RecordingEngine { query in
+            guard query.moves.isEmpty else { return self.analysis(0, best: nil) }
+            // 区域外的 A19 和次数太少的 C2 不猜。
+            return EngineAnalysis(candidates: [
+                .init(move: e2, visits: 100, winrate: 0.5, scoreLead: 10),
+                .init(move: Point(0, 0), visits: 50, winrate: 0.5, scoreLead: 9),
+                .init(move: d2, visits: 40, winrate: 0.5, scoreLead: 8),
+                .init(move: Point(2, 17), visits: 5, winrate: 0.5, scoreLead: 1),
+            ], winrate: 0.5, scoreLead: 10, ownership: [])
+        }
+        let solver = EngineSolver(problem: .sample, engine: engine)
+        await solver.prepare([])
+        #expect(await engine.waitFor { $0.moves == [d2] }?.priority == -1)
+        #expect(await engine.waitFor { $0.moves == [e2] }?.priority == -1)
+        #expect(!engine.queries.contains { $0.moves == [Point(0, 0)] || $0.moves == [Point(2, 17)] })
+        // 孩子下了猜中的那手，直接用算好的结果，不再问引擎。
+        let count = engine.queries.count
+        _ = await solver.judge([e2])
+        #expect(engine.queries.count == count)
     }
 
     @Test("下对以后对方只想停一手，题目就做完了")

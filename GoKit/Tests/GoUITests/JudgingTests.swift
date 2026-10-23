@@ -1,3 +1,4 @@
+import Foundation
 import GoCore
 import Testing
 @testable import GoUI
@@ -204,5 +205,56 @@ struct EngineJudgingTests {
         model.tap(Point(0, 10))
         await model.waitUntilIdle()
         #expect(model.message?.text == "离题目里的棋子太远了，可以悔棋再试")
+    }
+
+    /// 每次算 0.4 秒的假引擎：开头黑棋领先 10 目、最想下 E2；别的局面都是白棋最想下 F1。记下每个请求。
+    private final class SlowEngine: GoEngine, @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [EngineQuery] = []
+        var queries: [EngineQuery] { lock.withLock { recorded } }
+
+        func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis {
+            lock.withLock { recorded.append(query) }
+            try? await Task.sleep(for: .milliseconds(400))
+            let best = query.moves.isEmpty ? Point(4, 17) : Point(5, 18)
+            let score: Double = query.moves.isEmpty ? 10 : -10
+            return EngineAnalysis(candidates: [.init(move: best, visits: 100, winrate: 0.5, scoreLead: score)], winrate: 0.5, scoreLead: score, ownership: [])
+        }
+    }
+
+    @Test("对方应手前的停顿和引擎计算同时进行，不是算完再停")
+    func pauseOverlapsThinking() async throws {
+        let model = ProblemEditorModel(problem: .sample, engine: SlowEngine())
+        model.replyDelay = .milliseconds(500)
+        model.confirmMoves = false
+        model.switchMode(to: .solve)
+        try await Task.sleep(for: .seconds(1))   // 开头的局面先算好
+
+        let start = ContinuousClock.now
+        model.tap(Point(3, 17))   // D2 没被猜到，要现算 0.4 秒
+        await model.waitUntilIdle()
+        let elapsed = ContinuousClock.now - start
+        #expect(model.tree.path.count == 3)
+        #expect(elapsed >= .milliseconds(500))
+        #expect(elapsed < .milliseconds(800))   // 以前是 0.4 + 0.5 = 0.9 秒
+    }
+
+    @Test("思考深度：新开的题按选的档位算，中途改了从下一手开始用")
+    func depth() async throws {
+        let engine = SlowEngine()
+        let model = ProblemEditorModel(problem: .sample, engine: engine)
+        model.replyDelay = .zero
+        model.confirmMoves = false
+        model.engineDepth = .quick
+        model.switchMode(to: .solve)
+        #expect(model.hasEngine)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(engine.queries.first { $0.moves.isEmpty }?.maxVisits == EngineDepth.quick.visits)
+
+        model.engineDepth = .deep
+        try await Task.sleep(for: .milliseconds(100))
+        model.tap(Point(3, 17))
+        await model.waitUntilIdle()
+        #expect(engine.queries.first { $0.moves == [Point(3, 17)] }?.maxVisits == EngineDepth.deep.visits)
     }
 }

@@ -9,6 +9,7 @@ import GoVision
 /// 把照片拷到 App 的 Documents，路径不以 / 开头时就到 Documents 里找。
 /// 再加 `-engineProblem <题号>` 只看那一道，并打印加了外框的棋盘和引擎考虑的每一手；
 /// `-engineVisits <次数>` 改每个局面算多少次（默认 400）。
+/// `-engineDepth quick|standard|deep` 按 App 里的思考深度做题（默认标准），打印孩子每下一手到对方应手用了多久。
 enum EngineSelfTest {
     static func runIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -23,6 +24,7 @@ enum EngineSelfTest {
 
     private static func run(photo: URL) async {
         guard let engine = InProcessKataGo.shared else { return log("没有打包模型") }
+        let arguments = ProcessInfo.processInfo.arguments
         log("引擎：\(engine.name)")
         // 先量一下速度：空棋盘算 20 次要多久。
         let warm = ContinuousClock.now
@@ -31,11 +33,19 @@ enum EngineSelfTest {
         let timed = ContinuousClock.now
         let next = try? await engine.analyze(EngineQuery(board: Board(size: 19), firstPlayer: .black, moves: [Point(3, 3)], komi: 7.5, maxVisits: 50))
         log("再算 50 次用时 \(ContinuousClock.now - timed)，白领先 \(next.map { String(format: "%.2f", $0.scoreLead) } ?? "?") 目")
+        // 预热过后，一个请求每秒能算多少次：算 3 次，每次 200 次。
+        for round in 1...3 {
+            let clock = ContinuousClock.now
+            let result = try? await engine.analyze(EngineQuery(board: Board(size: 19), firstPlayer: .black, moves: [Point(3, 3), Point(15, 15), Point(round, 2)], komi: 7.5, maxVisits: 200))
+            let seconds = (ContinuousClock.now - clock) / .seconds(1)
+            let visits = result?.candidates.reduce(0) { $0 + $1.visits } ?? 0
+            log("第 \(round) 次：\(visits) 次用 \(String(format: "%.2f", seconds)) 秒，每秒 \(Int(Double(visits) / seconds)) 次")
+        }
+        if arguments.contains("-engineSpeedOnly") { return }
         guard let image = PhotoLoader.image(at: photo), let page = try? PageRecognizer.recognize(image) else {
             return log("照片识别失败：\(photo.path)")
         }
         log("\(photo.lastPathComponent)：\(page.diagrams.count) 道题 \(page.toPlay?.name ?? "?")先 \(page.goal?.name ?? "题型不明")")
-        let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-engineProblem"), index + 1 < arguments.count, let number = Int(arguments[index + 1]) {
             guard let diagram = page.diagrams.first(where: { $0.number == number }) else { return log("没找到第 \(number) 题") }
             await inspect(page.problem(for: diagram), engine: engine)
@@ -48,13 +58,18 @@ enum EngineSelfTest {
 
     /// 按引擎的正解一直下到判"答对了"，打印手顺和每道题用的时间；第 7 题另外试一下错的 D2。
     private static func playOut(_ problem: Problem, engine: KataGoEngine) async {
-        let solver = EngineSolver(problem: problem, engine: engine)
+        let solver = EngineSolver(problem: problem, engine: engine, depth: depth)
         if problem.title == "第 35 页第 7 题" {
             log("第 7 题下 D2：\(await solver.judge([Point(3, 17)]))")
         }
         let start = ContinuousClock.now
         var moves: [Point?] = []
-        defer { log("\(problem.title)：\(name(moves)) 用时 \(ContinuousClock.now - start)") }
+        var waits: [Duration] = []
+        defer {
+            let seconds = waits.map { String(format: "%.2f", Double($0.components.attoseconds) / 1e18 + Double($0.components.seconds)) }
+            log("\(problem.title)：\(name(moves)) 用时 \(ContinuousClock.now - start)，每手等 \(seconds.joined(separator: " ")) 秒")
+        }
+        await solver.prepare(moves)
         for _ in 0..<16 {
             // 正解里没有落子（最好的是停一手，比如对方认输停了一手）时，像孩子一样去收气、提子；
             // 没有要吃的子，就下引擎最想下的那手。
@@ -64,10 +79,18 @@ enum EngineSelfTest {
             if next == nil { next = await solver.captureMove(moves) }
             if next == nil { next = await solver.suggestedMove(moves) }
             guard let move = next else { return log("  找不到能下的地方") }
+            // 像孩子一样想一会儿再下，引擎趁这时提前算。
+            try? await Task.sleep(for: .seconds(2))
             moves.append(move)
+            let tapped = ContinuousClock.now
             let verdict = await solver.judge(moves)
-            guard verdict == .correct else { return log("  最后一手：\(verdict)") }
+            guard verdict == .correct else {
+                waits.append(ContinuousClock.now - tapped)
+                return log("  最后一手：\(verdict)")
+            }
             moves.append(await solver.reply(moves))
+            waits.append(ContinuousClock.now - tapped)
+            await solver.prepare(moves)
         }
         log("  下了 16 手还没做完")
     }
@@ -98,6 +121,12 @@ enum EngineSelfTest {
             }
             log("归属（先下/停一手）：" + lines.joined(separator: "  "))
         }
+    }
+
+    private static var depth: EngineDepth {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-engineDepth"), index + 1 < arguments.count else { return .standard }
+        return EngineDepth(rawValue: arguments[index + 1]) ?? .standard
     }
 
     private static func name(_ moves: [Point?]) -> String {

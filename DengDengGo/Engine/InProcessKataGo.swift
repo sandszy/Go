@@ -54,6 +54,15 @@ struct InProcessKataGo: KataGoTransport {
         return KataGoEngine(transport: transport, name: "KataGo（\(hardware.rawValue)）")
     }
 
+    /// 开发时用启动参数 `-katagoConfig "参数=值, 参数=值"` 临时改配置，比较不同设置的速度。
+    private static var debugOverrides: String {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-katagoConfig"), index + 1 < arguments.count { return arguments[index + 1] }
+        #endif
+        return ""
+    }
+
     let config: String
     let model: String
     let hardware: Hardware
@@ -63,7 +72,7 @@ struct InProcessKataGo: KataGoTransport {
             withConfig: config,
             model: model,
             useGPU: hardware == .gpu,
-            overrides: hardware.configOverrides,
+            overrides: [hardware.configOverrides, Self.debugOverrides].filter { !$0.isEmpty }.joined(separator: ", "),
             onLine: onLine
         )
     }

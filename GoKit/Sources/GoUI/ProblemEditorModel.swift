@@ -81,9 +81,9 @@ actor Judge {
     /// 引擎判题时留给题目的区域，区域外是引擎那边的外框，下在那里引擎不认。入门判题器没有外框，是 nil。
     nonisolated let area: BoardRegion?
 
-    init?(problem: Problem, engine: (any GoEngine)?) {
+    init?(problem: Problem, engine: (any GoEngine)?, depth: EngineDepth) {
         if let engine, !problem.setup.isEmpty {
-            let solver = EngineSolver(problem: problem, engine: engine)
+            let solver = EngineSolver(problem: problem, engine: engine, depth: depth)
             backend = .engine(solver)
             continuesAfterWrong = true
             area = solver.frame.area
@@ -117,6 +117,10 @@ actor Judge {
         return 0
     }
 
+    func setDepth(_ depth: EngineDepth) async {
+        if case .engine(let solver) = backend { await solver.setDepth(depth) }
+    }
+
     /// 轮到孩子下时先让引擎算着，孩子下完就能马上判。
     func prepare(_ moves: [Point?]) async {
         if case .engine(let solver) = backend { await solver.prepare(moves) }
@@ -147,8 +151,18 @@ public final class ProblemEditorModel {
             }
         }
     }
-    /// 孩子下完到对方应手之间停一下，让孩子先看清自己那手。
-    public var replyDelay: Duration = .milliseconds(500)
+    /// 孩子下完到对方应手至少隔这么久，让孩子先看清自己那手。引擎算的时间也算在里面。
+    public var replyDelay: Duration = .milliseconds(300)
+    /// 引擎每一步想多深。改了从下一手开始用。
+    public var engineDepth: EngineDepth = .standard {
+        didSet {
+            guard engineDepth != oldValue, let judge else { return }
+            let depth = engineDepth
+            Task { await judge.setDepth(depth) }
+        }
+    }
+    /// 有引擎时才能选想多深；入门判题器没有深浅。
+    public var hasEngine: Bool { engine != nil }
 
     public private(set) var tree: GameTree
     public private(set) var pending: Point?
@@ -376,7 +390,7 @@ public final class ProblemEditorModel {
     public func restart() {
         cancelWork()
         tree = GameTree(root: problem.startPosition)
-        judge = Judge(problem: problem, engine: engine)
+        judge = Judge(problem: problem, engine: engine, depth: engineDepth)
         verdicts = [:]
         notes = [:]
         afterNavigation()
@@ -538,6 +552,7 @@ public final class ProblemEditorModel {
         let delay = replyDelay
         let player = problem.toPlay
         let opponent = player.opponent.name
+        let start = ContinuousClock.now
 
         work = Task {
             let verdict = await judge.judge(moves, position)
@@ -552,7 +567,9 @@ public final class ProblemEditorModel {
                 finish(node, EditorMessage(text: "这一手太复杂，算不出来，可以自己接着下", tone: .info))
             case .correct, .wrong:
                 let reply = await judge.reply(moves, position)
-                if delay > .zero { try? await Task.sleep(for: delay) }
+                // 引擎算得快，就补足停顿；算得比停顿久，算完马上应。
+                let wait = delay - (ContinuousClock.now - start)
+                if wait > .zero { try? await Task.sleep(for: wait) }
                 guard !Task.isCancelled, tree.currentID == node else { return }
                 if let reply {
                     // 判题器只会从合法的下法里挑。

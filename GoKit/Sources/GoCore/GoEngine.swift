@@ -9,14 +9,20 @@ public struct EngineQuery: Sendable, Hashable {
     public var maxVisits: Int
     /// 搜索时双方都不下这些点。题目区域里离棋子很远的空地放在这里，引擎就不会去那里占地。
     public var avoid: [Point]
+    /// 好几个请求同时在算时，数大的先算。提前猜着算的请求用负数，让给孩子正在等的那个。
+    public var priority: Int
 
-    public init(board: Board, firstPlayer: Stone, moves: [Point?] = [], komi: Double, maxVisits: Int, avoid: [Point] = []) {
+    public init(
+        board: Board, firstPlayer: Stone, moves: [Point?] = [], komi: Double, maxVisits: Int, avoid: [Point] = [],
+        priority: Int = 0
+    ) {
         self.board = board
         self.firstPlayer = firstPlayer
         self.moves = moves
         self.komi = komi
         self.maxVisits = maxVisits
         self.avoid = avoid
+        self.priority = priority
     }
 
     /// 现在轮到谁下。

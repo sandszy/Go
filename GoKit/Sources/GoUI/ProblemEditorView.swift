@@ -4,6 +4,8 @@ import SwiftUI
 /// 摆题和做题的主界面。iPad 横屏时棋盘在左、操作面板在右；竖屏时面板在棋盘下面。
 public struct ProblemEditorView: View {
     @Bindable private var model: ProblemEditorModel
+    /// 家长选的思考深度，下次打开 App 还是这个。
+    @AppStorage("engineDepth") private var storedDepth: EngineDepth = .standard
 
     public init(model: ProblemEditorModel) {
         self.model = model
@@ -36,6 +38,7 @@ public struct ProblemEditorView: View {
             .padding(24)
         }
         .background(Theme.background)
+        .onChange(of: storedDepth, initial: true) { model.engineDepth = storedDepth }
         .confirmationDialog(
             "换棋盘大小会清空已摆的棋子",
             isPresented: Binding(
@@ -226,6 +229,17 @@ public struct ProblemEditorView: View {
                     : "自己两边下，随时可以再打开")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                if model.autoJudge && model.hasEngine {
+                    Picker("思考深度", selection: $storedDepth) {
+                        ForEach(EngineDepth.allCases, id: \.self) { depth in
+                            Text(depth.name).tag(depth)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text("思考深度：\(storedDepth.detail)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             Toggle("落子前确认", isOn: $model.confirmMoves)
             if model.confirmMoves {
