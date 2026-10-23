@@ -1,16 +1,25 @@
 import GoCore
 import SwiftUI
 
-/// 面板上用的小棋子图标。
+/// 面板上用的小棋子图标，和棋盘上的棋子用同一套质感。
 struct StoneIcon: View {
     let stone: Stone
     var size: CGFloat = 28
 
     var body: some View {
+        let light = UnitPoint(x: 0.32, y: 0.28)
         Circle()
-            .fill(stone == .black ? Color.black : Color.white)
-            .overlay(Circle().stroke(Color.gray, lineWidth: stone == .white ? 1 : 0))
+            .fill(
+                RadialGradient(
+                    gradient: stone == .black ? Theme.blackStoneGradient : Theme.whiteStoneGradient,
+                    center: light,
+                    startRadius: 0,
+                    endRadius: size * 0.75
+                )
+            )
+            .overlay(Circle().stroke(stone == .black ? Theme.blackStoneRim.opacity(0.25) : Theme.whiteStoneRim, lineWidth: stone == .white ? 1 : 0.5))
             .frame(width: size, height: size)
+            .shadow(color: .black.opacity(0.3), radius: size * 0.08, x: size * 0.04, y: size * 0.06)
     }
 }
 
