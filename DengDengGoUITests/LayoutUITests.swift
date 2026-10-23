@@ -62,7 +62,7 @@ final class LayoutUITests: XCTestCase {
         attachScreenshot(named: "竖屏-提示")
     }
 
-    /// 第 7 题：下 E2（左数第 5 列、下数第 2 行），子落上去，轮到白棋。不用引擎时不判题，自己两边下。
+    /// 第 7 题：下 E2（左数第 5 列、下数第 2 行），子落上去，轮到白棋。不用引擎时不打分，自己两边下。
     @MainActor
     func testSampleProblemPlaysMove() {
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -74,7 +74,7 @@ final class LayoutUITests: XCTestCase {
 
         let board = boardElement(in: app)
         XCTAssertTrue(board.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["没有判题引擎，只能自己两边下"].exists)
+        XCTAssertTrue(app.staticTexts["没有引擎，不能打分，只能自己两边下"].exists)
         let e2 = board.coordinate(withNormalizedOffset: CGVector(dx: 4.75 / 9.5, dy: 5.75 / 7.5))
         e2.tap()
         e2.tap()

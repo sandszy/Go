@@ -1,13 +1,13 @@
 # 登登围棋
 
-以 iPad 为主的围棋学习 App：拍下印刷的作业题，摆上棋盘自己做，AI 判每一手的对错、替对手应。
+以 iPad 为主的围棋学习 App：拍下印刷的作业题，摆上棋盘自己做，AI 给每一手打分、替对手应。
 
 ## 目录
 
 - `docs/`：需求说明和技术架构，见下面的“文档”。
 - `DengDengGo.xcodeproj`、`DengDengGo/`：iOS App 外壳：入口、资源，以及 `Engine/` 里把 KataGo 接进 App 的代码和配置。
 - `GoKit/`：Swift 包，主要代码都在这里。
-  - `GoCore`：规则引擎（提子、禁入点、打劫）、题目模型、变化树，以及用 KataGo 判题（死活外框、按目数判对错），纯 Swift。
+  - `GoCore`：规则引擎（提子、禁入点、打劫）、题目模型、变化树，以及用 KataGo 给每一手打分（死活外框、比最好的一手亏几目），纯 Swift。
   - `GoVision`：从照片识别印刷习题：找棋盘图、认黑白子、读“黑先”、题型、题号和页码。
   - `GoUI`：棋盘和摆题、做题界面，iOS 和 macOS 都能编译。
   - `board-snapshot`：把棋盘渲染成 PNG，没有模拟器时检查画面用。
@@ -23,13 +23,13 @@
 
 ## KataGo 模型
 
-做题时用本地的 KataGo 判对错、替对方应，不用联网。模型不在仓库里（约 98MB），第一次编译前先下载：
+做题时用本地的 KataGo 给每一手打分、替对方应，不用联网。模型不在仓库里（约 98MB），第一次编译前先下载：
 
 ```bash
 Scripts/fetch-katago-model.sh
 ```
 
-下载到 `DengDengGo/Engine/kata1-b18c384nbt.bin.gz`，编译时自动打包进 App。没有模型时 App 照样能编译，只是不判题。KataGo 的模型按 KataGo Neural Network License 发布，可以随 App 分发，但要附上版权和许可声明；上架前要在 App 里加一个“致谢”页，放 KataGo 和模型的许可。
+下载到 `DengDengGo/Engine/kata1-b18c384nbt.bin.gz`，编译时自动打包进 App。没有模型时 App 照样能编译，只是不打分。KataGo 的模型按 KataGo Neural Network License 发布，可以随 App 分发，但要附上版权和许可声明；上架前要在 App 里加一个“致谢”页，放 KataGo 和模型的许可。
 
 启动参数（`-katagoHardware`、`-engineSelfTest` 等）见[技术架构](docs/技术架构.md#6-构建运行和测试)。在 Xcode 里是 Product → Scheme → Edit Scheme → Run → Arguments。
 
@@ -88,7 +88,7 @@ cd GoKit && swift run board-snapshot /tmp/snapshots
 2. 在顶部的运行目标里选一台 iPad 模拟器，比如 “iPad Air 11-inch (M4)”。
 3. 点运行（⌘R）。
 
-模拟器上用鼠标点就相当于用手指点。模拟器里 KataGo 跑在 CPU 上，判一手要几十秒，只适合试流程。
+模拟器上用鼠标点就相当于用手指点。模拟器里 KataGo 跑在 CPU 上，算一手要几十秒，只适合试流程。
 
 **方法二：装到真 iPad 上给登登用（推荐）**
 

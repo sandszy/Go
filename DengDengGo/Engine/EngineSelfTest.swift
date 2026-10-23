@@ -56,43 +56,38 @@ enum EngineSelfTest {
         }
     }
 
-    /// 按引擎的正解一直下到判"答对了"，打印手顺和每道题用的时间；第 7 题另外试一下错的 D2。
+    /// 每次下引擎最想下的那手，下 8 手，打印每手的得分、对方的应手和等了多久；第 7 题另外试一下 D2。
     private static func playOut(_ problem: Problem, engine: KataGoEngine) async {
         let solver = EngineSolver(problem: problem, engine: engine, depth: depth)
         if problem.title == "第 35 页第 7 题" {
-            log("第 7 题下 D2：\(await solver.judge([Point(3, 17)]))")
+            log("第 7 题下 D2：\(await solver.score([Point(3, 17)]))")
         }
         let start = ContinuousClock.now
         var moves: [Point?] = []
+        var scores: [String] = []
         var waits: [Duration] = []
         defer {
             let seconds = waits.map { String(format: "%.2f", Double($0.components.attoseconds) / 1e18 + Double($0.components.seconds)) }
-            log("\(problem.title)：\(name(moves)) 用时 \(ContinuousClock.now - start)，每手等 \(seconds.joined(separator: " ")) 秒")
+            log("\(problem.title)：\(name(moves)) 用时 \(ContinuousClock.now - start)")
+            log("  每手亏 \(scores.joined(separator: " ")) 目，等 \(seconds.joined(separator: " ")) 秒")
         }
         await solver.prepare(moves)
-        for _ in 0..<16 {
-            // 正解里没有落子（最好的是停一手，比如对方认输停了一手）时，像孩子一样去收气、提子；
-            // 没有要吃的子，就下引擎最想下的那手。
-            // 对方刚停了一手（认输），就去提子。
-            var next = moves.last == .some(nil) ? await solver.captureMove(moves) : nil
-            if next == nil { next = await solver.correctMoves(moves).first }
-            if next == nil { next = await solver.captureMove(moves) }
-            if next == nil { next = await solver.suggestedMove(moves) }
-            guard let move = next else { return log("  找不到能下的地方") }
+        for _ in 0..<8 {
+            guard let move = await solver.suggestedMove(moves) else { return log("  找不到能下的地方") }
             // 像孩子一样想一会儿再下，引擎趁这时提前算。
             try? await Task.sleep(for: .seconds(2))
             moves.append(move)
             let tapped = ContinuousClock.now
-            let verdict = await solver.judge(moves)
-            guard verdict == .correct else {
+            let score = await solver.score(moves)
+            guard case let .loss(loss) = score else {
                 waits.append(ContinuousClock.now - tapped)
-                return log("  最后一手：\(verdict)")
+                return log("  最后一手：\(score)")
             }
+            scores.append(String(format: "%.1f", loss))
             moves.append(await solver.reply(moves))
             waits.append(ContinuousClock.now - tapped)
             await solver.prepare(moves)
         }
-        log("  下了 16 手还没做完")
     }
 
     /// 打印一道题加了外框的样子，以及做题方先下、停一手时引擎考虑的下法。

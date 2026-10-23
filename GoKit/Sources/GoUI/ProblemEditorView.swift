@@ -229,13 +229,17 @@ public struct ProblemEditorView: View {
                 .foregroundStyle(.secondary)
 
             if model.canJudge {
-                Toggle("AI 陪下", isOn: $model.autoJudge)
-                Text(model.autoJudge
-                    ? "AI 判每一手的对错，并下对手棋"
-                    : "自己两边下，随时可以再打开")
+                Toggle("AI 打分", isOn: $model.autoScore)
+                Text(model.autoScore
+                    ? "每一手显示比最好的下法亏几目"
+                    : "不显示分数，随时可以再打开")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                if model.autoJudge {
+                Toggle("AI 陪下", isOn: $model.autoReply)
+                Text(model.autoReply ? "AI 替对手下" : "自己两边下")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                if model.autoScore || model.autoReply {
                     Picker("思考深度", selection: $storedDepth) {
                         ForEach(EngineDepth.allCases, id: \.self) { depth in
                             Text(depth.name).tag(depth)

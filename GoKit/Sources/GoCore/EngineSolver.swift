@@ -1,50 +1,34 @@
-/// 做题一方下完一手后的判断。
-public enum Verdict: Sendable, Equatable {
-    /// 目标已经达成：吃掉了，或者逃出来了。
-    case solved
-    /// 这一手对，题目还没做完。
-    case correct
-    /// 这一手不对。
-    case wrong
+/// 一手棋的得分。
+public enum MoveScore: Sendable, Equatable {
+    /// 比引擎认为最好的一手亏了这么多目，不小于 0。
+    case loss(Double)
+    /// 下在题目区域外面。引擎那边那里是外框，算不了。
+    case outside
     /// 引擎出错，算不出来。
     case unknown
 }
 
-/// 用围棋引擎判题：题目外面摆上外框，比较孩子下的这一手和引擎认为最好的一手差多少目。
+/// 用围棋引擎给每一手打分：题目外面摆上外框，比较这一手和引擎认为最好的一手差多少目。
 ///
-/// 不需要知道"要吃哪块"，做活、杀棋、连接、切断都能判；只要这一手比最好的下法亏得不多，就算对。
+/// 不判对错，也不判做没做完：不需要知道"要吃哪块"，做活、杀棋、连接、切断都能打分，好不好由人看分数决定。
 public actor EngineSolver {
     public nonisolated let frame: TsumegoFrame
     private let problem: Problem
     private let engine: any GoEngine
     private var depth: EngineDepth
     private var analyses: [[Point?]: Task<EngineAnalysis, any Error>] = [:]
-    /// 孩子还在想时猜着提前算的局面。孩子下了别处，这些就停掉。
+    /// 人还在想时猜着提前算的局面。下了别处，这些就停掉。
     private var guesses: Set<[Point?]> = []
-    /// 正等着孩子下的局面。孩子已经下了，就不用再猜这个局面之后的手。
+    /// 正等着人下的局面。已经下了，就不用再猜这个局面之后的手。
     private var awaiting: [Point?]?
-    private var keyStones: [Point: KeyStone]?
+    /// 题目要分死活的子，第一手以后只在它们旁边搜索。
+    private var keyStones: Set<Point>?
 
-    /// 题目要分死活的一个子。
-    private struct KeyStone {
-        /// 做题方先下时它倒向哪边：1 是归做题方，-1 是归对方。
-        var direction: Double
-        /// 做题方先下、双方都下最好时，它往 direction 那边倒了多少（归属乘 direction）。
-        var best: Double
-        /// 这个子是谁的。对方的子 direction 为 1（最后归做题方）就是要吃掉的子。
-        var color: Stone
-    }
-
-    /// 比最好的下法亏这么多目以内都算对。外框让死活的差别至少有好几目，吃一个子也有两目。
+    /// 亏这么多目以内，界面上分数用绿色，超过用橙色。外框让死活的差别至少有好几目，吃一个子也有两目。
     public static let tolerance = 1.5
-    /// 题目要分死活的子，倒向做题方这么多就算定了。外框离得近时，引擎对死活的把握很少到 0.9。
-    /// 有的子双方都下最好也定不下来（引擎看是一半一半），这种子只要接近最好的结果就行，见 isFinished。
-    static let settled = 0.5
     /// 做题方先下和停一手相比，归属变化超过这个值的子，就是题目要分死活的子。
     static let contested = 0.6
-    /// 做题方连着下对这么多手还没做完，也算答对，免得一直下下去。
-    static let maxMoves = 15
-    /// 轮到孩子时，猜孩子会下引擎最想下的这几手，提前算好。
+    /// 轮到人下时，猜会下引擎最想下的这几手，提前算好。
     static let guessCount = 3
 
     public init(problem: Problem, engine: any GoEngine, depth: EngineDepth = .standard) {
@@ -59,46 +43,41 @@ public actor EngineSolver {
         self.depth = depth
     }
 
-    /// moves 是从题目开始下的每一手，最后一手是做题一方刚下的。
-    public func judge(_ moves: [Point?]) async -> Verdict {
+    /// moves 是从题目开始下的每一手，给最后一手打分。黑白哪一方下的都行，分数从下这手的一方来看。
+    public func score(_ moves: [Point?]) async -> MoveScore {
         guard let last = moves.last else { return .unknown }
-        if let p = last, isOutside(p) { return .wrong }
+        if let p = last, isOutside(p) { return .outside }
         dropGuesses(except: moves)
         guard let before = try? await analysis(Array(moves.dropLast())),
               let after = try? await analysis(moves)
         else { return .unknown }
+        // 第一手以后要按要分死活的子限制搜索范围，开头那两个局面算完就找出来。
+        _ = await findKeyStones()
 
-        // 两次搜索各有误差：这一手单独算出的分数，和下这一手之前引擎对它的估计，取对孩子有利的那个。
+        // 两次搜索各有误差：这一手单独算出的分数，和下这一手之前引擎对它的估计，取对下棋一方有利的那个。
         var score = -after.scoreLead
         if let estimate = before.candidates.first(where: { $0.move == last && $0.visits * 10 >= (before.candidates.first?.visits ?? 0) }) {
             score = max(score, estimate.scoreLead)
         }
-        if before.scoreLead - score > Self.tolerance { return .wrong }
-        // 孩子执题目里的另一方时，那一方通常是输的，没有"答对了"，结果定没定看 goalReached。
-        guard moves.count % 2 == 1 else { return .correct }
-        return await isFinished(moves, after) ? .solved : .correct
+        // 偶尔算出比"最好的一手"还好，算 0。
+        return .loss(max(0, before.scoreLead - score))
     }
 
-    /// 做题方（题目里先下的一方）刚下完 moves 的最后一手，题目的目标是不是已经达成了。
-    /// 孩子执另一方、AI 替做题方下的时候用：达成了就是结果定了，孩子这边没办法了。
-    public func goalReached(_ moves: [Point?]) async -> Bool {
-        guard moves.count % 2 == 1, let after = try? await analysis(moves) else { return false }
-        return await isFinished(moves, after)
-    }
-
-    /// 这一点在留给题目的区域外面。引擎那边区域外摆着外框，下在这里引擎不认，直接算错。
+    /// 这一点在留给题目的区域外面。引擎那边区域外摆着外框，下在这里引擎不认，不打分。
     public nonisolated func isOutside(_ p: Point) -> Bool {
         !frame.area.contains(p)
     }
 
-    /// 轮到对方时替对方选一手，nil 表示停一手。判题时已经算过这个局面，直接用那次的结果。
+    /// 轮到对方时替对方选一手，nil 表示停一手。打分时已经算过这个局面，直接用那次的结果。
     public func reply(_ moves: [Point?]) async -> Point? {
+        dropGuesses(except: moves)
+        _ = await findKeyStones()
         guard let analysis = try? await analysis(moves) else { return nil }
         return bestMove(in: analysis)
     }
 
-    /// 提前算好这个局面，孩子想下一手的时候引擎就在算了。
-    /// 算完再猜孩子会下的几手，也提前算好：猜中了，孩子一下完就能判、对方马上应。
+    /// 提前算好这个局面，人想下一手的时候引擎就在算了。
+    /// 算完再猜会下的几手，也提前算好：猜中了，一下完就能打分、对方马上应。
     public func prepare(_ moves: [Point?]) {
         let current = task(for: moves)
         awaiting = moves
@@ -107,40 +86,13 @@ public actor EngineSolver {
         Task { await guess(after: moves, current) }
     }
 
-    /// 引擎在题目区域里最想下的一手（不算停一手）。以后做提示用；自测里在"最好是停一手"时
-    /// 用它代替孩子下，比如对方认输停了一手，孩子要接着去提子。
+    /// 引擎在题目区域里最想下的一手（不算停一手）。以后做提示用；自测里用它代替孩子下。
     public func suggestedMove(_ moves: [Point?]) async -> Point? {
         guard let analysis = try? await analysis(moves) else { return nil }
         return analysis.candidates.lazy.compactMap(\.move).first { frame.area.contains($0) }
     }
 
-    /// 去吃对方要被吃的那块棋：气最少的那块，紧它的一口气（能提就提）。
-    /// 对方认输停了一手以后，引擎觉得双方都停也行，没有落子的正解，孩子这时就该去收气、提子。
-    public func captureMove(_ moves: [Point?]) async -> Point? {
-        guard let keyStones = await findKeyStones(), let position = position(after: moves),
-              position.toPlay == problem.toPlay
-        else { return nil }
-        let opponent = problem.toPlay.opponent
-        let board = position.board
-        var groups: [Set<Point>] = []
-        for (p, stone) in keyStones where stone.color == opponent && stone.direction > 0 && board[p] == opponent {
-            if !groups.contains(where: { $0.contains(p) }) { groups.append(board.group(at: p)) }
-        }
-        for group in groups.sorted(by: { board.liberties(of: $0).count < board.liberties(of: $1).count }) {
-            let liberties = board.liberties(of: group).sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-            if let move = liberties.first(where: position.isLegal) { return move }
-        }
-        return nil
-    }
-
-    /// 还在棋盘上、要做题方吃掉的对方子有几个。对方认输停一手时，用来提醒孩子去提子。
-    public func targetsRemaining(_ moves: [Point?]) async -> Int {
-        guard let keyStones = await findKeyStones(), let board = position(after: moves)?.board else { return 0 }
-        let opponent = problem.toPlay.opponent
-        return keyStones.filter { $0.value.color == opponent && $0.value.direction > 0 && board[$0.key] == opponent }.count
-    }
-
-    /// 轮到做题一方时的正解。
+    /// 眼前这个局面的正解：比最好的一手亏得不超过 tolerance 的下法。以后做提示用。
     public func correctMoves(_ moves: [Point?]) async -> [Point] {
         guard let analysis = try? await analysis(moves), let best = analysis.candidates.first else { return [] }
         return analysis.candidates.compactMap { candidate in
@@ -194,7 +146,7 @@ public actor EngineSolver {
         }
     }
 
-    /// 孩子下了 moves，别的猜测都用不上了，停掉，引擎专心算孩子在等的这个。
+    /// 下了 moves，别的猜测都用不上了，停掉，引擎专心算孩子在等的这个。
     private func dropGuesses(except moves: [Point?]) {
         for guess in guesses where guess != moves {
             analyses[guess]?.cancel()
@@ -212,7 +164,7 @@ public actor EngineSolver {
         let opening = moves.isEmpty || moves == [nil]
         guard !opening, let keyStones, !keyStones.isEmpty else { return frame.distantPoints(on: board) }
         var fight = Set<Point>()
-        for p in keyStones.keys where board[p] != nil {
+        for p in keyStones where board[p] != nil {
             fight.formUnion(board.group(at: p))
         }
         guard !fight.isEmpty else { return frame.distantPoints(on: board) }
@@ -230,59 +182,21 @@ public actor EngineSolver {
         return nil
     }
 
-    /// 题目做完了没有。不是一倒向做题方就算完，要一直下到结果摆在棋盘上：
-    /// - 有要吃掉的对方子（对杀、吃子题里对方被吃的那块），要真的提掉；
-    /// - 没有要吃的子（做活、救自己的子），要分死活的子都定下来，而且对方已经没有要紧的手：
-    ///   引擎让对方停一手，或者对方最想下的地方离这块棋很远。
-    /// 做题方下对了 maxMoves 手还没完，也算做完。
-    private func isFinished(_ moves: [Point?], _ after: EngineAnalysis) async -> Bool {
-        let playerMoves = moves.indices.filter { $0.isMultiple(of: 2) }.count
-        if playerMoves >= Self.maxMoves { return true }
-        guard let keyStones = await findKeyStones(), !keyStones.isEmpty else { return analysisSuggestsPass(after) }
-        guard let board = position(after: moves)?.board else { return false }
-
-        let opponent = problem.toPlay.opponent
-        let targets = keyStones.filter { $0.value.color == opponent && $0.value.direction > 0 }.map(\.key)
-        if !targets.isEmpty {
-            return targets.allSatisfy { board[$0] != opponent }
-        }
-
-        let size = problem.setup.size
-        // after 是对方要下的局面，归属从对方来看，取反才是做题方的。
-        let settled = keyStones.allSatisfy { p, stone in
-            let leaning = -(after.ownership[safe: p.y * size + p.x] ?? 0) * stone.direction
-            return leaning >= min(Self.settled, stone.best - 0.2)
-        }
-        guard settled else { return false }
-        guard let best = after.candidates.first else { return true }
-        guard let move = best.move, frame.area.contains(move) else { return true }
-        return !keyStones.keys.contains { max(abs($0.x - move.x), abs($0.y - move.y)) <= 2 }
-    }
-
-    /// 题目要分死活的子，以及做题方先下时它们倒向哪边（1 是归做题方，-1 是归对方）。
-    /// 做题方先下和停一手让对方先下，这些子的归属差别很大；外面早就活净或死净的子两种情况都一样。
-    private func findKeyStones() async -> [Point: KeyStone]? {
+    /// 题目要分死活的子：做题方先下和停一手让对方先下，这些子的归属差别很大；
+    /// 外面早就活净或死净的子两种情况都一样。
+    private func findKeyStones() async -> Set<Point>? {
         if let keyStones { return keyStones }
         guard let first = try? await analysis([]), let passed = try? await analysis([nil]) else { return nil }
         let size = problem.setup.size
-        var stones: [Point: KeyStone] = [:]
+        var stones = Set<Point>()
         for p in problem.setup.occupiedPoints {
             let index = p.y * size + p.x
             guard let mine = first.ownership[safe: index], let theirs = passed.ownership[safe: index] else { continue }
             // passed 从对方来看，-theirs 才是做题方的；两者之差就是先下一手带来的变化。
-            let change = mine + theirs
-            if abs(change) >= Self.contested {
-                let direction: Double = change > 0 ? 1 : -1
-                stones[p] = KeyStone(direction: direction, best: mine * direction, color: problem.setup[p]!)
-            }
+            if abs(mine + theirs) >= Self.contested { stones.insert(p) }
         }
         keyStones = stones
         return stones
-    }
-
-    private func analysisSuggestsPass(_ analysis: EngineAnalysis) -> Bool {
-        guard let best = analysis.candidates.first else { return false }
-        return best.move == nil || !frame.area.contains(best.move!)
     }
 
     /// 从题目开始下完 moves 以后的局面。有下不了的手（不该发生）时返回 nil。

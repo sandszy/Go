@@ -85,43 +85,33 @@ public struct VariationChoice: Identifiable, Equatable, Sendable {
     public let isCurrent: Bool
 }
 
-/// 判题在自己的 actor 里跑，等引擎时不卡界面。
+/// 打分和替对方应手在自己的 actor 里跑，等引擎时不卡界面。
 actor Judge {
     private let solver: EngineSolver
     /// 留给题目的区域，区域外是引擎那边的外框，下在那里引擎不认。
     nonisolated let area: BoardRegion
 
-    /// 没有引擎或者棋盘是空的，就不判。
+    /// 没有引擎或者棋盘是空的，就不用引擎。
     init?(problem: Problem, engine: (any GoEngine)?, depth: EngineDepth) {
         guard let engine, !problem.setup.isEmpty else { return nil }
         solver = EngineSolver(problem: problem, engine: engine, depth: depth)
         area = solver.frame.area
     }
 
-    /// moves 是从题目开始下的每一手。
-    func judge(_ moves: [Point?]) async -> Verdict {
-        await solver.judge(moves)
+    /// moves 是从题目开始下的每一手，给最后一手打分。
+    func score(_ moves: [Point?]) async -> MoveScore {
+        await solver.score(moves)
     }
 
     func reply(_ moves: [Point?]) async -> Point? {
         await solver.reply(moves)
     }
 
-    /// 做题方刚下完 moves 的最后一手，题目的目标是不是达成了。孩子执另一方、AI 替做题方下的时候用。
-    func goalReached(_ moves: [Point?]) async -> Bool {
-        await solver.goalReached(moves)
-    }
-
-    /// 还没提掉、要孩子吃的对方子有几个。
-    func targetsRemaining(_ moves: [Point?]) async -> Int {
-        await solver.targetsRemaining(moves)
-    }
-
     func setDepth(_ depth: EngineDepth) async {
         await solver.setDepth(depth)
     }
 
-    /// 轮到孩子下时先让引擎算着，孩子下完就能马上判。
+    /// 轮到人下时先让引擎算着，下完就能马上打分。
     func prepare(_ moves: [Point?]) async {
         await solver.prepare(moves)
     }
@@ -139,17 +129,15 @@ public final class ProblemEditorModel {
     /// 做题时显示全盘；关闭时只显示题目所在的局部。
     public var showWholeBoard = false
     public var showCoordinates = false
-    /// AI 陪下：做题时判孩子每一手的对错，并替对方应。随时可以开关：
-    /// 关掉以后孩子自己两边下；再打开，AI 从眼前的局面接着陪下。
-    public var autoJudge = true {
-        didSet {
-            guard autoJudge != oldValue, mode == .solve else { return }
-            if autoJudge {
-                resumeJudging()
-            } else {
-                cancelWork()
-            }
-        }
+    /// AI 打分：每一手显示比最好的下法亏几目，不说对错，好不好由人看分数决定。
+    /// 随时可以开关，和 AI 陪下互不影响；再打开时，最后一手还没打分就补上。
+    public var autoScore = true {
+        didSet { if autoScore != oldValue { switchesChanged() } }
+    }
+    /// AI 陪下：替孩子的对手下。随时可以开关：关掉以后孩子自己两边下（照样打分）；
+    /// 再打开，AI 从眼前的局面接着应。
+    public var autoReply = true {
+        didSet { if autoReply != oldValue { switchesChanged() } }
     }
     /// 孩子下完到对方应手至少隔这么久，让孩子先看清自己那手。引擎算的时间也算在里面。
     public var replyDelay: Duration = .milliseconds(300)
@@ -161,13 +149,13 @@ public final class ProblemEditorModel {
             Task { await judge.setDepth(depth) }
         }
     }
-    /// 有判题引擎（KataGo）。没有时 AI 陪下用不了，只能自己两边下。
+    /// 有引擎（KataGo）。没有时不能打分，AI 也不应，只能自己两边下。
     public var hasEngine: Bool { engine != nil }
 
     public private(set) var tree: GameTree
     public private(set) var pending: Point?
     public private(set) var message: EditorMessage?
-    /// 正在判题或等对方应手，这时不接受落子和悔棋。
+    /// 正在打分或等对方应手，这时不接受落子和悔棋。
     public private(set) var isThinking = false
 
     /// 等用户确认要换成的棋盘大小。不为 nil 时界面弹出确认框。
@@ -192,13 +180,13 @@ public final class ProblemEditorModel {
     private var nextAlternateStone: Stone = .black
     private let engine: (any GoEngine)?
     private var judge: Judge?
-    private var verdicts: [Int: Verdict] = [:]
+    private var scores: [Int: MoveScore] = [:]
     /// AI 替孩子的对手下的那些手（落子和停一手）。孩子执哪一方，看最近一手不是 AI 下的棋。
     private var aiMoves: Set<Int> = []
     private var notes: [Int: EditorMessage] = [:]
     private var work: Task<Void, Never>?
 
-    /// engine 为 nil 时不判题，只能自己两边下；homework 为 nil 时不存题。
+    /// engine 为 nil 时不打分，只能自己两边下；homework 为 nil 时不存题。
     public init(problem: Problem = .sample, engine: (any GoEngine)? = nil, homework: HomeworkStore? = nil) {
         self.problem = problem
         self.engine = engine
@@ -255,16 +243,16 @@ public final class ProblemEditorModel {
     public var canUndo: Bool { mode == .solve && !isThinking && tree.canUndo }
     public var canRedo: Bool { mode == .solve && !isThinking && tree.canRedo }
 
-    /// 这道题能不能自动判对错。
+    /// 这道题能不能用引擎打分、陪下。
     public var canJudge: Bool { engine != nil && !problem.setup.isEmpty }
 
-    /// 告诉家长用什么判题。
+    /// 告诉家长用什么打分。
     public var judgeSummary: String {
-        guard let engine else { return "没有判题引擎，只能自己两边下" }
-        return problem.setup.isEmpty ? "摆好题目后，做题时可以自动判对错" : "判题：\(engine.name) 看每一手比最好的下法亏多少"
+        guard let engine else { return "没有引擎，不能打分，只能自己两边下" }
+        return problem.setup.isEmpty ? "摆好题目后，做题时给每一手打分" : "打分：\(engine.name) 算每一手比最好的下法亏几目"
     }
 
-    /// 当前这一步可以切换的变化。判题时以做题一方的那一手为准，对方的应手跟着走。
+    /// 当前这一步可以切换的变化。AI 陪下时以人下的那一手为准，AI 的应手跟着走。
     public var variationChoices: [VariationChoice] {
         guard mode == .solve, let node = branchNode, let parent = tree[node].parent else { return [] }
         let siblings = tree[parent].children
@@ -409,12 +397,12 @@ public final class ProblemEditorModel {
         message = EditorMessage(text: "从作业本里拿出了\(saved.problem.title.isEmpty ? "这道题" : saved.problem.title)，点“做题”开始", tone: .info)
     }
 
-    /// 判题时，App 替对方下的那手跟着一起退回，回到孩子自己的回合。
+    /// AI 陪下时，AI 替对方下的那手跟着一起退回，回到孩子自己的回合。
     public func undo() {
         guard canUndo else { return }
         let replied = aiMoves.contains(tree.currentID)
         tree.undo()
-        if isJudgeEnabled, replied, tree.canUndo { tree.undo() }
+        if isReplyEnabled, replied, tree.canUndo { tree.undo() }
         afterNavigation()
     }
 
@@ -430,11 +418,11 @@ public final class ProblemEditorModel {
         cancelWork()
         tree = GameTree(root: problem.startPosition)
         judge = Judge(problem: problem, engine: engine, depth: engineDepth)
-        verdicts = [:]
+        scores = [:]
         aiMoves = []
         notes = [:]
         afterNavigation()
-        if isJudgeEnabled, let judge { Task { await judge.prepare([]) } }
+        if isUsingEngine, let judge { Task { await judge.prepare([]) } }
     }
 
     public func selectVariation(_ id: Int) {
@@ -450,40 +438,51 @@ public final class ProblemEditorModel {
         afterNavigation()
     }
 
-    /// 等判题和对方应手做完。测试用。
+    /// 等打分和对方应手做完。测试用。
     public func waitUntilIdle() async {
         await work?.value
     }
 
     // MARK: - 内部
 
-    private var isJudgeEnabled: Bool { autoJudge && judge != nil }
+    private var isReplyEnabled: Bool { autoReply && judge != nil }
 
-    /// 路上有一手已经答对（题目做完）或算不出来，后面就是自由下，不再判题。答错以后接着陪下、接着判。
-    /// 有一手下到了题目区域外面，引擎算不了，也停，悔掉那手才接着判。
-    private var isJudging: Bool {
-        guard isJudgeEnabled, let judge else { return false }
-        if moves.contains(where: { $0.map { !judge.area.contains($0) } ?? false }) { return false }
-        return !tree.path.contains { verdicts[$0] == .solved || verdicts[$0] == .unknown }
+    /// 这时要不要用引擎：两个开关至少开一个。没有终点，一直打分、一直应；
+    /// 只有一手下到了题目区域外面时停下（引擎那边那里是外框，算不了），悔掉那手才接着来。
+    private var isUsingEngine: Bool {
+        guard autoScore || autoReply, let judge else { return false }
+        return !moves.contains { $0.map { !judge.area.contains($0) } ?? false }
     }
 
-    /// 刚打开 AI 陪下：最后一手是孩子自己下的、还没判，孩子就执这一色，先判再替对手下；
-    /// 最后一手是 AI 下的，轮到孩子，就先替下一手算着。
-    private func resumeJudging() {
-        guard isJudging, !isThinking, let judge else { return }
+    /// 开关变了：正在做的停下，按新的开关从眼前的局面接着来。
+    private func switchesChanged() {
+        guard mode == .solve else { return }
+        cancelWork()
+        resume()
+    }
+
+    /// 最后一手是人下的，还缺分数或者缺 AI 的应手，就补上；否则轮到人下，先替下一手算着。
+    private func resume() {
+        guard isUsingEngine, !isThinking, let judge else { return }
         let node = tree.currentID
-        if tree.mover(of: node) != nil, !aiMoves.contains(node), verdicts[node] == nil {
-            startJudging(node)
+        if tree.mover(of: node) != nil, !aiMoves.contains(node), needsWork(node) {
+            start(node)
         } else {
             let next = moves
             Task { await judge.prepare(next) }
         }
     }
 
-    /// 判题时，当前是 AI 替对手下的那手就退到孩子下的那一手。
+    /// 人下的这一手还缺分数，或者 AI 陪下开着、还没应。
+    private func needsWork(_ node: Int) -> Bool {
+        let replied = tree[node].children.contains { aiMoves.contains($0) }
+        return (autoScore && scores[node] == nil) || (autoReply && !replied)
+    }
+
+    /// AI 陪下时，当前是 AI 替对手下的那手就退到孩子下的那一手。
     private var branchNode: Int? {
         var id = tree.currentID
-        if isJudgeEnabled, aiMoves.contains(id), let parent = tree[id].parent {
+        if isReplyEnabled, aiMoves.contains(id), let parent = tree[id].parent {
             id = parent
         }
         return tree[id].parent == nil ? nil : id
@@ -491,7 +490,7 @@ public final class ProblemEditorModel {
 
     /// 走到孩子下的一手以后，当时 AI 替对手下的那手也跟着走出来。
     private func redoReply() {
-        if isJudgeEnabled, let next = tree.redoTarget, aiMoves.contains(next) { tree.redo() }
+        if isReplyEnabled, let next = tree.redoTarget, aiMoves.contains(next) { tree.redo() }
     }
 
     private static func letter(_ index: Int) -> String {
@@ -554,21 +553,21 @@ public final class ProblemEditorModel {
         pending = nil
 
         // 孩子点下去的这一子是哪色，孩子就执哪色，AI 下另一色。
-        let judging = isJudging
+        let using = isUsingEngine
         do throws(MoveError) {
             let result = try tree.play(p)
             let node = tree.currentID
             if aiMoves.remove(node) != nil {
-                // 以前 AI 在这里下过同一手，这回是孩子自己下的，当成新的一手来判。
-                verdicts[node] = nil
+                // 以前 AI 在这里下过同一手，这回是孩子自己下的，当成新的一手。
+                scores[node] = nil
                 notes[node] = nil
             }
-            if let verdict = verdicts[node] {
-                // 这一手以前判过：直接走进当时的变化，对方的应手也跟着出来。
-                if verdict == .correct || verdict == .wrong { redoReply() }
+            if using, needsWork(node) {
+                start(node)
+            } else if using || notes[node] != nil {
+                // 这一手以前下过：直接走进当时的变化，分数照旧，AI 的应手也跟着出来。
+                redoReply()
                 afterNavigation()
-            } else if judging {
-                startJudging(node)
             } else {
                 let note = result.captured.isEmpty ? nil : EditorMessage(text: "提掉 \(result.captured.count) 个子", tone: .info)
                 notes[node] = note
@@ -579,101 +578,95 @@ public final class ProblemEditorModel {
         }
     }
 
-    private func startJudging(_ node: Int) {
-        guard let judge else { return }
+    /// 给人刚下的这一手打分（开着 AI 打分、还没打过分时），再替对手应（开着 AI 陪下时）。
+    private func start(_ node: Int) {
+        guard let judge, let mover = tree.mover(of: node) else { return }
         let moves = self.moves
-        if case let p?? = moves.last, !judge.area.contains(p) {
-            // 题目区域外引擎那边是外框，算不了，直接判错，不替对方应。
+        let point = tree[node].move?.point
+        if let point, !judge.area.contains(point) {
+            // 题目区域外引擎那边是外框，算不了：不打分，不替对方应。
             // 对杀题的区域只到棋子外面一路，可能比印出来的图小，这时说"太远了"。
-            verdicts[node] = .wrong
-            let printed = problem.region?.contains(p) ?? false
+            scores[node] = .outside
+            let printed = problem.region?.contains(point) ?? false
             let text = printed ? "离题目里的棋子太远了，可以悔棋再试" : "下到题目外面了，可以悔棋再试"
             finish(node, EditorMessage(text: text, tone: .warning))
             return
         }
         isThinking = true
         message = nil
-        let position = tree.position
+        let scoring = autoScore && scores[node] == nil
+        let replying = autoReply
+        let captured = tree[node].captured.count
+        let size = problem.setup.size
         let delay = replyDelay
-        let player = tree.mover(of: node) ?? problem.toPlay
-        let ai = player.opponent
-        let opponent = ai.name
+        let opponent = mover.opponent.name
         let start = ContinuousClock.now
 
         work = Task {
-            let verdict = await judge.judge(moves)
-            guard !Task.isCancelled, tree.currentID == node else { return }
-            verdicts[node] = verdict
-
-            switch verdict {
-            case .solved:
-                let captured = position.captures(by: player) - problem.startPosition.captures(by: player)
-                finish(node, EditorMessage(text: solvedText(captured: captured), tone: .success))
-            case .unknown:
-                finish(node, EditorMessage(text: "这一手太复杂，算不出来，可以自己接着下", tone: .info))
-            case .correct, .wrong:
+            if scoring {
+                let score = await judge.score(moves)
+                guard !Task.isCancelled, tree.currentID == node else { return }
+                scores[node] = score
+            }
+            let score = autoScore ? scores[node] : nil
+            var replyText: String?
+            // 算不出分数时引擎多半也算不出应手，不替对方乱下。
+            if replying, score != .unknown {
                 let reply = await judge.reply(moves)
                 // 引擎算得快，就补足停顿；算得比停顿久，算完马上应。
                 let wait = delay - (ContinuousClock.now - start)
                 if wait > .zero { try? await Task.sleep(for: wait) }
                 guard !Task.isCancelled, tree.currentID == node else { return }
                 if let reply {
-                    // 判题器只会从合法的下法里挑。
+                    // 引擎只会从合法的下法里挑。
                     _ = try? tree.play(reply)
+                    replyText = "\(opponent)棋应在 \(Coordinates.name(of: reply, size: size))"
                 } else {
                     tree.pass()
+                    replyText = "\(opponent)棋停了一手"
                 }
-                let replyNode = tree.currentID
-                aiMoves.insert(replyNode)
-                // 孩子执题目里的另一方：AI 替做题方下完，题目目标达成了，结果就定了。
-                if ai == problem.toPlay, await judge.goalReached(self.moves) {
-                    guard !Task.isCancelled, tree.currentID == replyNode else { return }
-                    verdicts[replyNode] = .solved
-                    let captured = tree.position.captures(by: ai) - problem.startPosition.captures(by: ai)
-                    let note = EditorMessage(text: lostText(captured: captured), tone: .info)
-                    notes[node] = note
-                    finish(replyNode, note)
-                    return
-                }
-                let text: String
-                if verdict == .correct {
-                    if reply != nil {
-                        text = "下得好！\(opponent)棋应在这里，接着下"
-                    } else if player == problem.toPlay, await judge.targetsRemaining(self.moves) > 0 {
-                        // 对方认输停一手了，孩子不一定知道接下来要干什么。
-                        text = "下得好！\(opponent)棋不应了，把\(opponent)子提掉就算答对"
-                    } else {
-                        text = "下得好！\(opponent)棋停了一手，接着下"
-                    }
-                    let next = self.moves
-                    Task { await judge.prepare(next) }
-                } else {
-                    let next = "可以悔棋再试，也可以接着下"
-                    text = reply == nil ? "不对哦，\(opponent)棋不用应也没事。\(next)" : "不对哦，看\(opponent)棋这样应。\(next)"
-                }
-                let note = EditorMessage(text: text, tone: verdict == .correct ? .success : .warning)
-                notes[node] = note
-                finish(tree.currentID, note)
+                aiMoves.insert(tree.currentID)
             }
+            let note = Self.note(mover: mover, point: point, size: size, score: score, captured: captured, reply: replyText)
+            notes[node] = note
+            finish(tree.currentID, note)
+            let next = self.moves
+            Task { await judge.prepare(next) }
         }
+    }
+
+    /// 给人看的一句话：这一手的分数、提了几个子、对方应在哪。不说对错，颜色按分数上。
+    static func note(mover: Stone, point: Point?, size: Int, score: MoveScore?, captured: Int, reply: String?) -> EditorMessage {
+        if score == .unknown {
+            return EditorMessage(text: "这一手算不出来，可以接着下", tone: .info)
+        }
+        var parts: [String] = []
+        var head = ""
+        var tone = EditorMessage.Tone.info
+        if case let .loss(loss)? = score {
+            let name = point.map { Coordinates.name(of: $0, size: size) } ?? "停一手"
+            head = "\(mover.name) \(name)：\(scoreText(loss))"
+            tone = loss <= EngineSolver.tolerance ? .success : .warning
+        }
+        if captured > 0 {
+            head += head.isEmpty ? "提掉 \(captured) 个子" : "，提掉 \(captured) 个子"
+        }
+        if !head.isEmpty { parts.append(head) }
+        if let reply { parts.append(reply) }
+        return EditorMessage(text: parts.joined(separator: "。"), tone: tone)
+    }
+
+    /// 亏了几目：负数、保留一位小数，比如"−2.3 目"；不到 0.05 目写"0 目"。用减号"−"，比连字符好认。
+    static func scoreText(_ loss: Double) -> String {
+        let tenths = (loss * 10).rounded()
+        guard tenths > 0 else { return "0 目" }
+        let text = tenths.truncatingRemainder(dividingBy: 10) == 0 ? String(Int(tenths / 10)) : String(format: "%.1f", tenths / 10)
+        return "−\(text) 目"
     }
 
     /// 从题目开始到现在下的每一手，nil 是停一手。
     private var moves: [Point?] {
         tree.path.compactMap { tree[$0].move }.map(\.point)
-    }
-
-    /// 按棋盘上实际发生的事说，不按题型：三种题型里各有好几种作业题（吃子和做活是一种），说“活了”不一定对。
-    private func solvedText(captured: Int) -> String {
-        captured > 0 ? "答对了！吃掉了 \(captured) 个\(problem.toPlay.opponent.name)子" : "答对了！"
-    }
-
-    /// 孩子执题目里的另一方，AI 替做题方达成了目标。
-    private func lostText(captured: Int) -> String {
-        let ai = problem.toPlay.name
-        let me = problem.toPlay.opponent.name
-        let result = captured > 0 ? "\(ai)棋吃掉了 \(captured) 个\(me)子" : "\(ai)棋赢了这块棋"
-        return "\(result)，这题\(me)棋没办法了。可以悔棋换个下法再试"
     }
 
     private func finish(_ node: Int, _ note: EditorMessage) {

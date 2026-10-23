@@ -131,7 +131,7 @@ struct FailingEngine: GoEngine {
     func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis { throw .failed("不该问引擎") }
 }
 
-@Suite("引擎判题")
+@Suite("引擎打分")
 struct EngineSolverTests {
     private let e2 = Point(4, 17)
     private let d2 = Point(3, 17)
@@ -156,25 +156,34 @@ struct EngineSolverTests {
         })
     }
 
-    @Test("亏得不多算对，对方应在引擎最想下的地方")
-    func correct() async {
+    @Test("下在引擎最想下的地方得 0 目，对方应在引擎最想下的地方")
+    func scoreBest() async {
         let solver = solver()
-        #expect(await solver.judge([e2]) == .correct)
+        #expect(await solver.score([e2]) == .loss(0))
         #expect(await solver.reply([e2]) == f1)
     }
 
-    @Test("亏很多目算错")
-    func wrong() async {
-        #expect(await solver().judge([d2]) == .wrong)
+    @Test("亏几目就是几目：开头黑领先 10 目，D2 以后白领先 5 目，亏 15 目")
+    func scoreLoss() async {
+        #expect(await solver().score([d2]) == .loss(15))
     }
 
-    @Test("下到题目区域外面直接算错，不问引擎（引擎那边那里是外框，不认这一手）")
+    @Test("算出来比最好的一手还好时，算 0 目")
+    func neverPositive() async {
+        let e2 = e2
+        let solver = EngineSolver(problem: .sample, engine: ScriptedEngine { query in
+            query.moves.isEmpty ? self.analysis(10, best: e2) : self.analysis(-12, best: nil)
+        })
+        #expect(await solver.score([e2]) == .loss(0))
+    }
+
+    @Test("下到题目区域外面不打分，不问引擎（引擎那边那里是外框，不认这一手）")
     func outsideArea() async {
         let solver = EngineSolver(problem: .sample, engine: FailingEngine())
         #expect(solver.isOutside(Point(0, 0)))
         #expect(!solver.isOutside(e2))
-        #expect(await solver.judge([Point(0, 0)]) == .wrong)
-        #expect(await solver.judge([e2]) == .unknown)
+        #expect(await solver.score([Point(0, 0)]) == .outside)
+        #expect(await solver.score([e2]) == .unknown)
     }
 
     @Test("每个局面按档位算多少次，中途换档从下一个局面开始用")
@@ -184,7 +193,7 @@ struct EngineSolverTests {
             query.moves.isEmpty ? self.analysis(10, best: e2) : self.analysis(-10, best: f1)
         }
         let solver = EngineSolver(problem: .sample, engine: engine, depth: .quick)
-        _ = await solver.judge([e2])
+        _ = await solver.score([e2])
         #expect(engine.queries.allSatisfy { $0.maxVisits == EngineDepth.quick.visits })
 
         await solver.setDepth(.deep)
@@ -212,70 +221,49 @@ struct EngineSolverTests {
         #expect(!engine.queries.contains { $0.moves == [Point(0, 0)] || $0.moves == [Point(2, 17)] })
         // 孩子下了猜中的那手，直接用算好的结果，不再问引擎。
         let count = engine.queries.count
-        _ = await solver.judge([e2])
+        _ = await solver.score([e2])
         #expect(engine.queries.count == count)
     }
 
-    @Test("孩子执另一方（白）：下得好也只是下对了，不算答对；AI 替黑下完达成目标时 goalReached")
+    @Test("白方的手也能打分，从白方来看")
     func otherSide() async {
         let e2 = e2, f1 = f1, c2 = Point(2, 17)
         let solver = EngineSolver(problem: .sample, engine: ScriptedEngine { query in
             switch query.moves {
-            case []: return self.analysis(10, best: e2)
-            case [e2]: return self.analysis(-10, best: f1)
-            case [e2, f1]: return self.analysis(10, best: nil)   // 轮到黑，黑只想停一手
-            case [e2, f1, c2]: return self.analysis(-10, best: nil)
-            default: return self.analysis(0, best: nil)
+            case [e2]: return self.analysis(-10, best: f1)   // 轮到白，白最好落后 10 目
+            case [e2, f1]: return self.analysis(10, best: c2)
+            case [e2, c2]: return self.analysis(13, best: f1)   // 白下 C2，黑领先 13 目：白亏 3 目
+            default: return self.analysis(10, best: e2)
             }
         })
-        #expect(await solver.judge([e2, f1]) == .correct)
-        #expect(await !solver.goalReached([e2, f1]))
-        #expect(await solver.goalReached([e2, f1, c2]))
+        #expect(await solver.score([e2, f1]) == .loss(0))
+        #expect(await solver.score([e2, c2]) == .loss(3))
     }
 
-    @Test("下对以后对方只想停一手，题目就做完了")
-    func solved() async {
-        #expect(await solver().judge([e2, f1, Point(2, 17)]) == .solved)
-    }
-
-    @Test("要分死活的子双方都下最好也只有一半把握时，下到接近最好的结果就算做完")
-    func undecidedKeyStone() async {
-        let key = Point(2, 15)   // 第 7 题里的一个黑子
+    @Test("第一手以后，双方只在要分死活的那块棋旁边一路以内下")
+    func searchNearKeyStones() async {
+        let key = Point(2, 15)   // 第 7 题里的一个黑子，和 (3, 15)、(4, 15) 连成一块
         let e2 = e2, f1 = f1
         @Sendable func ownership(_ value: Double) -> [Double] {
             var values = [Double](repeating: 0, count: 361)
             values[key.y * 19 + key.x] = value
             return values
         }
-        // 黑先下最好时这个子只到 -0.2（说不准），黑停一手就死（从白看 +0.98）。
-        let solver = EngineSolver(problem: .sample, engine: ScriptedEngine { query in
+        // 黑先下这块棋活（+0.9），黑停一手就死（从白看 +0.9），所以是要分死活的子。
+        let engine = RecordingEngine { query in
             switch query.moves {
-            case []: return EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.6, scoreLead: 3)], winrate: 0.6, scoreLead: 3, ownership: ownership(-0.2))
-            case [nil]: return EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.6, scoreLead: 2)], winrate: 0.6, scoreLead: 2, ownership: ownership(0.98))
-            default: return EngineAnalysis(candidates: [.init(move: f1, visits: 100, winrate: 0.4, scoreLead: -3)], winrate: 0.4, scoreLead: -3, ownership: ownership(0.25))
+            case []: EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.9, scoreLead: 10)], winrate: 0.9, scoreLead: 10, ownership: ownership(0.9))
+            case [nil]: EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.9, scoreLead: 10)], winrate: 0.9, scoreLead: 10, ownership: ownership(0.9))
+            default: EngineAnalysis(candidates: [.init(move: f1, visits: 100, winrate: 0.1, scoreLead: -10)], winrate: 0.1, scoreLead: -10, ownership: ownership(-0.9))
             }
-        })
-        #expect(await solver.judge([e2]) == .solved)
-    }
-
-    @Test("对方要吃掉的子还在棋盘上，就只是下对了，接着下，不算做完")
-    func targetsMustBeCaptured() async {
-        let target = Point(2, 16)   // 第 7 题里要吃的白子
-        let e2 = e2, f1 = f1
-        @Sendable func ownership(_ value: Double) -> [Double] {
-            var values = [Double](repeating: 0, count: 361)
-            values[target.y * 19 + target.x] = value
-            return values
         }
-        // 黑先下这块白子归黑（死），黑停一手白棋就活（从白看 +0.9）。下对以后对方还想应在这块棋旁边。
-        let solver = EngineSolver(problem: .sample, engine: ScriptedEngine { query in
-            switch query.moves {
-            case []: return EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.9, scoreLead: 10)], winrate: 0.9, scoreLead: 10, ownership: ownership(0.9))
-            case [nil]: return EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.9, scoreLead: 10)], winrate: 0.9, scoreLead: 10, ownership: ownership(0.9))
-            default: return EngineAnalysis(candidates: [.init(move: f1, visits: 100, winrate: 0.1, scoreLead: -10)], winrate: 0.1, scoreLead: -10, ownership: ownership(-0.95))
-            }
-        })
-        #expect(await solver.judge([e2]) == .correct)
+        let solver = EngineSolver(problem: .sample, engine: engine)
+        await solver.prepare([])
+        _ = await solver.score([e2])
+        await solver.prepare([e2, f1])
+        let avoid = await engine.waitFor { $0.moves == [e2, f1] }?.avoid ?? []
+        #expect(avoid.contains(Point(2, 13)), "离这块棋两路，开头能下，第一手以后不下")
+        #expect(!avoid.contains(Point(2, 14)), "紧挨着这块棋，能下")
     }
 
     @Test("引擎出错时算不出来")
@@ -283,7 +271,7 @@ struct EngineSolverTests {
         struct Broken: GoEngine {
             func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis { throw .unavailable("没有模型") }
         }
-        #expect(await EngineSolver(problem: .sample, engine: Broken()).judge([e2]) == .unknown)
+        #expect(await EngineSolver(problem: .sample, engine: Broken()).score([e2]) == .unknown)
     }
 }
 
