@@ -63,7 +63,16 @@ public actor EngineSolver {
             score = max(score, estimate.scoreLead)
         }
         if before.scoreLead - score > Self.tolerance { return .wrong }
+        // 孩子执题目里的另一方时，那一方通常是输的，没有"答对了"，结果定没定看 goalReached。
+        guard moves.count % 2 == 1 else { return .correct }
         return await isFinished(moves, after) ? .solved : .correct
+    }
+
+    /// 做题方（题目里先下的一方）刚下完 moves 的最后一手，题目的目标是不是已经达成了。
+    /// 孩子执另一方、AI 替做题方下的时候用：达成了就是结果定了，孩子这边没办法了。
+    public func goalReached(_ moves: [Point?]) async -> Bool {
+        guard moves.count % 2 == 1, let after = try? await analysis(moves) else { return false }
+        return await isFinished(moves, after)
     }
 
     /// 这一点在留给题目的区域外面。引擎那边区域外摆着外框，下在这里引擎不认，直接算错。

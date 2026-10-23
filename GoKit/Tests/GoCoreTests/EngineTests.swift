@@ -216,6 +216,23 @@ struct EngineSolverTests {
         #expect(engine.queries.count == count)
     }
 
+    @Test("孩子执另一方（白）：下得好也只是下对了，不算答对；AI 替黑下完达成目标时 goalReached")
+    func otherSide() async {
+        let e2 = e2, f1 = f1, c2 = Point(2, 17)
+        let solver = EngineSolver(problem: .sample, engine: ScriptedEngine { query in
+            switch query.moves {
+            case []: return self.analysis(10, best: e2)
+            case [e2]: return self.analysis(-10, best: f1)
+            case [e2, f1]: return self.analysis(10, best: nil)   // 轮到黑，黑只想停一手
+            case [e2, f1, c2]: return self.analysis(-10, best: nil)
+            default: return self.analysis(0, best: nil)
+            }
+        })
+        #expect(await solver.judge([e2, f1]) == .correct)
+        #expect(await !solver.goalReached([e2, f1]))
+        #expect(await solver.goalReached([e2, f1, c2]))
+    }
+
     @Test("下对以后对方只想停一手，题目就做完了")
     func solved() async {
         #expect(await solver().judge([e2, f1, Point(2, 17)]) == .solved)

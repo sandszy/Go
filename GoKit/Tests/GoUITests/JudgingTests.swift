@@ -257,4 +257,66 @@ struct EngineJudgingTests {
         await model.waitUntilIdle()
         #expect(engine.queries.first { $0.moves == [Point(3, 17)] }?.maxVisits == EngineDepth.deep.visits)
     }
+
+    /// 按手顺回答的假引擎：开头黑最想下 E2；黑 E2、白 D2 以后黑最想下 C2；再往后白最想下 B2，
+    /// decided 为 true 时白只想停一手（黑的目标达成了）。分数都从轮到下的一方看，没人吃亏。
+    private struct OtherSideEngine: GoEngine {
+        var decided = false
+        func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis {
+            let e2 = Point(4, 17), d2 = Point(3, 17), c2 = Point(2, 17)
+            let best: Point? = switch query.moves {
+            case []: e2
+            case [e2]: d2
+            case [e2, d2]: c2
+            case [e2, d2, c2]: decided ? nil : Point(1, 17)
+            default: nil
+            }
+            let score: Double = query.toPlay == .black ? 5 : -5
+            return EngineAnalysis(candidates: [.init(move: best, visits: 100, winrate: 0.5, scoreLead: score)], winrate: 0.5, scoreLead: score, ownership: [])
+        }
+    }
+
+    /// 关掉 AI 陪下自己下黑 E2、白 D2，再打开：孩子执白。
+    private func playingWhite(decided: Bool = false) async -> ProblemEditorModel {
+        let model = ProblemEditorModel(problem: .sample, engine: OtherSideEngine(decided: decided))
+        model.replyDelay = .zero
+        model.confirmMoves = false
+        model.switchMode(to: .solve)
+        model.autoJudge = false
+        model.tap(Point(4, 17))
+        model.tap(Point(3, 17))
+        model.autoJudge = true
+        await model.waitUntilIdle()
+        return model
+    }
+
+    @Test("孩子执白：AI 判白那手，替黑下，又轮到白；悔棋连 AI 的黑一起退，重做一起回来")
+    func childPlaysWhite() async {
+        let model = await playingWhite()
+        #expect(model.message?.text == "下得好！黑棋应在这里，接着下")
+        #expect(model.tree.path.count == 4)
+        #expect(model.lastMove == Point(2, 17))
+        #expect(model.position.toPlay == .white)
+
+        model.undo()
+        #expect(model.tree.path.count == 2)
+        #expect(model.position.toPlay == .white)
+        model.redo()
+        #expect(model.tree.path.count == 4)
+        #expect(model.position.toPlay == .white)
+    }
+
+    @Test("孩子执白：AI 替黑达成目标，提示结果定了、可以悔棋，后面不再判")
+    func opponentReachesGoal() async {
+        let model = await playingWhite(decided: true)
+        #expect(model.message?.tone == .info)
+        #expect(model.message?.text.contains("这题白棋没办法了") == true)
+        #expect(model.message?.text.contains("可以悔棋") == true)
+        #expect(model.position.toPlay == .white)
+
+        model.tap(Point(1, 17))
+        await model.waitUntilIdle()
+        #expect(model.tree.path.count == 5)   // 不再替黑下
+        #expect(model.position.toPlay == .black)
+    }
 }

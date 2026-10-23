@@ -80,6 +80,8 @@ actor Judge {
     nonisolated let continuesAfterWrong: Bool
     /// 引擎判题时留给题目的区域，区域外是引擎那边的外框，下在那里引擎不认。入门判题器没有外框，是 nil。
     nonisolated let area: BoardRegion?
+    /// 孩子执题目里的另一方时也能判、也能替对手下。引擎可以；入门判题器只会判做题方。
+    nonisolated let judgesBothSides: Bool
 
     init?(problem: Problem, engine: (any GoEngine)?, depth: EngineDepth) {
         if let engine, !problem.setup.isEmpty {
@@ -87,10 +89,12 @@ actor Judge {
             backend = .engine(solver)
             continuesAfterWrong = true
             area = solver.frame.area
+            judgesBothSides = true
         } else if let solver = ProblemSolver(problem: problem) {
             backend = .search(solver)
             continuesAfterWrong = false
             area = nil
+            judgesBothSides = false
         } else {
             return nil
         }
@@ -109,6 +113,12 @@ actor Judge {
         case .engine(let solver): await solver.reply(moves)
         case .search(let solver): solver.reply(in: position)
         }
+    }
+
+    /// 做题方刚下完 moves 的最后一手，题目的目标是不是达成了。孩子执另一方、AI 替做题方下的时候用。
+    func goalReached(_ moves: [Point?]) async -> Bool {
+        if case .engine(let solver) = backend { return await solver.goalReached(moves) }
+        return false
     }
 
     /// 还没提掉、要孩子吃的对方子有几个。入门判题器不知道，返回 0。
@@ -189,6 +199,8 @@ public final class ProblemEditorModel {
     private let engine: (any GoEngine)?
     private var judge: Judge?
     private var verdicts: [Int: Verdict] = [:]
+    /// AI 替孩子的对手下的那些手（落子和停一手）。孩子执哪一方，看最近一手不是 AI 下的棋。
+    private var aiMoves: Set<Int> = []
     private var notes: [Int: EditorMessage] = [:]
     private var work: Task<Void, Never>?
 
@@ -374,15 +386,16 @@ public final class ProblemEditorModel {
     /// 判题时，App 替对方下的那手跟着一起退回，回到孩子自己的回合。
     public func undo() {
         guard canUndo else { return }
+        let replied = aiMoves.contains(tree.currentID)
         tree.undo()
-        if isJudgeEnabled, position.toPlay != problem.toPlay, tree.canUndo { tree.undo() }
+        if isJudgeEnabled, replied, tree.canUndo { tree.undo() }
         afterNavigation()
     }
 
     public func redo() {
         guard canRedo else { return }
         tree.redo()
-        if isJudgeEnabled, position.toPlay != problem.toPlay, tree.canRedo { tree.redo() }
+        redoReply()
         afterNavigation()
     }
 
@@ -392,6 +405,7 @@ public final class ProblemEditorModel {
         tree = GameTree(root: problem.startPosition)
         judge = Judge(problem: problem, engine: engine, depth: engineDepth)
         verdicts = [:]
+        aiMoves = []
         notes = [:]
         afterNavigation()
         if isJudgeEnabled, let judge { Task { await judge.prepare([]) } }
@@ -400,7 +414,7 @@ public final class ProblemEditorModel {
     public func selectVariation(_ id: Int) {
         guard !isThinking else { return }
         tree.go(to: id)
-        if isJudgeEnabled, position.toPlay != problem.toPlay, tree.canRedo { tree.redo() }
+        redoReply()
         afterNavigation()
     }
 
@@ -434,25 +448,32 @@ public final class ProblemEditorModel {
         }
     }
 
-    /// 刚打开 AI 陪下：轮到对方、孩子刚下的那手还没判，就先判再应；轮到孩子就先替下一手算着。
+    /// 刚打开 AI 陪下：最后一手是孩子自己下的、还没判，孩子就执这一色，先判再替对手下；
+    /// 最后一手是 AI 下的，轮到孩子，就先替下一手算着。
     private func resumeJudging() {
         guard isJudging, !isThinking, let judge else { return }
         let node = tree.currentID
-        if tree[node].parent != nil, tree.mover(of: node) == problem.toPlay, verdicts[node] == nil {
+        if let mover = tree.mover(of: node), !aiMoves.contains(node), verdicts[node] == nil,
+           judge.judgesBothSides || mover == problem.toPlay {
             startJudging(node)
-        } else if position.toPlay == problem.toPlay {
+        } else {
             let next = moves
             Task { await judge.prepare(next) }
         }
     }
 
-    /// 判题时，当前是对方的应手就退到孩子下的那一手。
+    /// 判题时，当前是 AI 替对手下的那手就退到孩子下的那一手。
     private var branchNode: Int? {
         var id = tree.currentID
-        if isJudgeEnabled, tree.mover(of: id) != problem.toPlay, let parent = tree[id].parent {
+        if isJudgeEnabled, aiMoves.contains(id), let parent = tree[id].parent {
             id = parent
         }
         return tree[id].parent == nil ? nil : id
+    }
+
+    /// 走到孩子下的一手以后，当时 AI 替对手下的那手也跟着走出来。
+    private func redoReply() {
+        if isJudgeEnabled, let next = tree.redoTarget, aiMoves.contains(next) { tree.redo() }
     }
 
     private static func letter(_ index: Int) -> String {
@@ -514,13 +535,19 @@ public final class ProblemEditorModel {
         }
         pending = nil
 
-        let judging = isJudging && position.toPlay == problem.toPlay
+        // 孩子点下去的这一子是哪色，孩子就执哪色，AI 下另一色。
+        let judging = isJudging && (judge?.judgesBothSides == true || position.toPlay == problem.toPlay)
         do throws(MoveError) {
             let result = try tree.play(p)
             let node = tree.currentID
+            if aiMoves.remove(node) != nil {
+                // 以前 AI 在这里下过同一手，这回是孩子自己下的，当成新的一手来判。
+                verdicts[node] = nil
+                notes[node] = nil
+            }
             if let verdict = verdicts[node] {
                 // 这一手以前判过：直接走进当时的变化，对方的应手也跟着出来。
-                if isJudgeEnabled, verdict == .correct || verdict == .wrong, tree.canRedo { tree.redo() }
+                if verdict == .correct || verdict == .wrong { redoReply() }
                 afterNavigation()
             } else if judging {
                 startJudging(node)
@@ -550,8 +577,9 @@ public final class ProblemEditorModel {
         message = nil
         let position = tree.position
         let delay = replyDelay
-        let player = problem.toPlay
-        let opponent = player.opponent.name
+        let player = tree.mover(of: node) ?? problem.toPlay
+        let ai = player.opponent
+        let opponent = ai.name
         let start = ContinuousClock.now
 
         work = Task {
@@ -577,11 +605,23 @@ public final class ProblemEditorModel {
                 } else {
                     tree.pass()
                 }
+                let replyNode = tree.currentID
+                aiMoves.insert(replyNode)
+                // 孩子执题目里的另一方：AI 替做题方下完，题目目标达成了，结果就定了。
+                if ai == problem.toPlay, await judge.goalReached(self.moves) {
+                    guard !Task.isCancelled, tree.currentID == replyNode else { return }
+                    verdicts[replyNode] = .solved
+                    let captured = tree.position.captures(by: ai) - problem.startPosition.captures(by: ai)
+                    let note = EditorMessage(text: lostText(captured: captured), tone: .info)
+                    notes[node] = note
+                    finish(replyNode, note)
+                    return
+                }
                 let text: String
                 if verdict == .correct {
                     if reply != nil {
                         text = "下得好！\(opponent)棋应在这里，接着下"
-                    } else if await judge.targetsRemaining(self.moves) > 0 {
+                    } else if player == problem.toPlay, await judge.targetsRemaining(self.moves) > 0 {
                         // 对方认输停一手了，孩子不一定知道接下来要干什么。
                         text = "下得好！\(opponent)棋不应了，把\(opponent)子提掉就算答对"
                     } else {
@@ -619,6 +659,24 @@ public final class ProblemEditorModel {
         case .capturingRace: return captured > 0 ? "答对了！\(capturedText)" : "答对了！对杀赢了"
         case nil: return captured > 0 ? "答对了！\(capturedText)" : "答对了！"
         }
+    }
+
+    /// 孩子执题目里的另一方，AI 替做题方达成了目标。
+    private func lostText(captured: Int) -> String {
+        let ai = problem.toPlay.name
+        let me = problem.toPlay.opponent.name
+        let retry = "可以悔棋换个下法再试"
+        let result: String
+        switch problem.goal {
+        case .escape: result = "\(ai)棋逃出来了"
+        case .live: result = "\(ai)棋活了"
+        case .kill: result = "\(me)棋活不了了"
+        case .connect: result = "\(ai)棋连上了"
+        case .cut: result = "\(me)棋被切断了"
+        case .capture, .capturingRace, nil:
+            result = captured > 0 ? "\(ai)棋吃掉了 \(captured) 个\(me)子" : "\(ai)棋赢了这块棋"
+        }
+        return "\(result)，这题\(me)棋没办法了。\(retry)"
     }
 
     private func finish(_ node: Int, _ note: EditorMessage) {

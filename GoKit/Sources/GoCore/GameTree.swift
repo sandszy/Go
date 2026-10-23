@@ -84,8 +84,11 @@ public struct GameTree: Sendable {
         currentID = parent
     }
 
+    /// 重做时会走进的那个节点。
+    public var redoTarget: Int? { current.preferredChild ?? current.children.first }
+
     public mutating func redo() {
-        guard let next = current.preferredChild ?? current.children.first else { return }
+        guard let next = redoTarget else { return }
         currentID = next
     }
 

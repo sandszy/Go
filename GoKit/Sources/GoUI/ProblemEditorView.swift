@@ -225,7 +225,7 @@ public struct ProblemEditorView: View {
             if model.canJudge {
                 Toggle("AI 陪下", isOn: $model.autoJudge)
                 Text(model.autoJudge
-                    ? "AI 判每一手的对错，并替\(model.problem.toPlay.opponent.name)棋应"
+                    ? "AI 判每一手的对错，并下对手棋"
                     : "自己两边下，随时可以再打开")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
