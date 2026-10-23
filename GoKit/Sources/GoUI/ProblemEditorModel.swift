@@ -75,12 +75,17 @@ actor Judge {
     }
 
     private let backend: Backend
+    /// 判错以后还能不能接着陪下、接着判。引擎看的是眼前的局面，可以；
+    /// 入门判题器是按题目开头定的"谁要吃谁"算的，局面一乱就不准，判错就停。
+    nonisolated let continuesAfterWrong: Bool
 
     init?(problem: Problem, engine: (any GoEngine)?) {
         if let engine, !problem.setup.isEmpty {
             backend = .engine(EngineSolver(problem: problem, engine: engine))
+            continuesAfterWrong = true
         } else if let solver = ProblemSolver(problem: problem) {
             backend = .search(solver)
+            continuesAfterWrong = false
         } else {
             return nil
         }
@@ -101,6 +106,12 @@ actor Judge {
         }
     }
 
+    /// 还没提掉、要孩子吃的对方子有几个。入门判题器不知道，返回 0。
+    func targetsRemaining(_ moves: [Point?]) async -> Int {
+        if case .engine(let solver) = backend { return await solver.targetsRemaining(moves) }
+        return 0
+    }
+
     /// 轮到孩子下时先让引擎算着，孩子下完就能马上判。
     func prepare(_ moves: [Point?]) async {
         if case .engine(let solver) = backend { await solver.prepare(moves) }
@@ -119,8 +130,18 @@ public final class ProblemEditorModel {
     /// 做题时显示全盘；关闭时只显示题目所在的局部。
     public var showWholeBoard = false
     public var showCoordinates = false
-    /// 题型支持时，做题自动判对错，并替对方应。
-    public var autoJudge = true
+    /// AI 陪下：做题时判孩子每一手的对错，并替对方应。随时可以开关：
+    /// 关掉以后孩子自己两边下；再打开，AI 从眼前的局面接着陪下。
+    public var autoJudge = true {
+        didSet {
+            guard autoJudge != oldValue, mode == .solve else { return }
+            if autoJudge {
+                resumeJudging()
+            } else {
+                cancelWork()
+            }
+        }
+    }
     /// 孩子下完到对方应手之间停一下，让孩子先看清自己那手。
     public var replyDelay: Duration = .milliseconds(500)
 
@@ -379,11 +400,28 @@ public final class ProblemEditorModel {
 
     private var isJudgeEnabled: Bool { autoJudge && judge != nil }
 
-    /// 路上有一手已经判完（答对、答错或算不出来），后面就是自由下，不再判题。
+    /// 路上有一手已经答对（题目做完）或算不出来，后面就是自由下，不再判题。
+    /// 答错以后，有引擎时接着陪下、接着判；入门判题器就停。
     private var isJudging: Bool {
-        isJudgeEnabled && !tree.path.contains { id in
-            if let verdict = verdicts[id] { return verdict != .correct }
-            return false
+        guard isJudgeEnabled, let judge else { return false }
+        return !tree.path.contains { id in
+            switch verdicts[id] {
+            case .solved?, .unknown?: true
+            case .wrong?: !judge.continuesAfterWrong
+            case .correct?, nil: false
+            }
+        }
+    }
+
+    /// 刚打开 AI 陪下：轮到对方、孩子刚下的那手还没判，就先判再应；轮到孩子就先替下一手算着。
+    private func resumeJudging() {
+        guard isJudging, !isThinking, let judge else { return }
+        let node = tree.currentID
+        if tree[node].parent != nil, tree.mover(of: node) == problem.toPlay, verdicts[node] == nil {
+            startJudging(node)
+        } else if position.toPlay == problem.toPlay {
+            let next = moves
+            Task { await judge.prepare(next) }
         }
     }
 
@@ -508,11 +546,19 @@ public final class ProblemEditorModel {
                 }
                 let text: String
                 if verdict == .correct {
-                    text = reply == nil ? "下得好！\(opponent)棋停了一手，接着下" : "下得好！\(opponent)棋应在这里，接着下"
+                    if reply != nil {
+                        text = "下得好！\(opponent)棋应在这里，接着下"
+                    } else if await judge.targetsRemaining(self.moves) > 0 {
+                        // 对方认输停一手了，孩子不一定知道接下来要干什么。
+                        text = "下得好！\(opponent)棋不应了，把\(opponent)子提掉就算答对"
+                    } else {
+                        text = "下得好！\(opponent)棋停了一手，接着下"
+                    }
                     let next = self.moves
                     Task { await judge.prepare(next) }
                 } else {
-                    text = reply == nil ? "不对哦，\(opponent)棋不用应也没事。悔棋再试试" : "不对哦，看\(opponent)棋这样应。悔棋再试试"
+                    let next = judge.continuesAfterWrong ? "可以悔棋再试，也可以接着下" : "悔棋再试试"
+                    text = reply == nil ? "不对哦，\(opponent)棋不用应也没事。\(next)" : "不对哦，看\(opponent)棋这样应。\(next)"
                 }
                 let note = EditorMessage(text: text, tone: verdict == .correct ? .success : .warning)
                 notes[node] = note

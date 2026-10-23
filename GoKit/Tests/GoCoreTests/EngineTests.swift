@@ -136,6 +136,26 @@ struct EngineSolverTests {
         #expect(await solver.judge([e2]) == .solved)
     }
 
+    @Test("对方要吃掉的子还在棋盘上，就只是下对了，接着下，不算做完")
+    func targetsMustBeCaptured() async {
+        let target = Point(2, 16)   // 第 7 题里要吃的白子
+        let e2 = e2, f1 = f1
+        @Sendable func ownership(_ value: Double) -> [Double] {
+            var values = [Double](repeating: 0, count: 361)
+            values[target.y * 19 + target.x] = value
+            return values
+        }
+        // 黑先下这块白子归黑（死），黑停一手白棋就活（从白看 +0.9）。下对以后对方还想应在这块棋旁边。
+        let solver = EngineSolver(problem: .sample, engine: ScriptedEngine { query in
+            switch query.moves {
+            case []: return EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.9, scoreLead: 10)], winrate: 0.9, scoreLead: 10, ownership: ownership(0.9))
+            case [nil]: return EngineAnalysis(candidates: [.init(move: e2, visits: 100, winrate: 0.9, scoreLead: 10)], winrate: 0.9, scoreLead: 10, ownership: ownership(0.9))
+            default: return EngineAnalysis(candidates: [.init(move: f1, visits: 100, winrate: 0.1, scoreLead: -10)], winrate: 0.1, scoreLead: -10, ownership: ownership(-0.95))
+            }
+        })
+        #expect(await solver.judge([e2]) == .correct)
+    }
+
     @Test("引擎出错时算不出来")
     func failure() async {
         struct Broken: GoEngine {

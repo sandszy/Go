@@ -44,6 +44,34 @@ struct JudgingTests {
         #expect(model.position.toPlay == .white)
     }
 
+    @Test("关掉 AI 陪下：自己两边下，白棋不自动应；再打开，AI 先判刚下的那手再应")
+    func toggleMidGame() async {
+        let model = solvingModel()
+        model.autoJudge = false
+        model.tap(e2)
+        await model.waitUntilIdle()
+        #expect(model.tree.path.count == 2)
+        #expect(model.position.toPlay == .white)
+        #expect(model.message == nil)
+
+        model.autoJudge = true
+        await model.waitUntilIdle()
+        #expect(model.message?.tone == .success)
+        #expect(model.tree.path.count == 3)
+        #expect(model.position.toPlay == .black)
+    }
+
+    @Test("AI 想的时候关掉开关，就不再应")
+    func toggleOffWhileThinking() async {
+        let model = solvingModel()
+        model.replyDelay = .seconds(5)
+        model.tap(e2)
+        model.autoJudge = false
+        await model.waitUntilIdle()
+        #expect(!model.isThinking)
+        #expect(model.tree.path.count == 2)
+    }
+
     @Test("悔棋连同白棋的应手一起退回，再下正解还能判")
     func undoAfterWrongMove() async {
         let model = solvingModel()
@@ -97,7 +125,7 @@ struct JudgingTests {
         #expect(model.tree.current.children.count == 1)
     }
 
-    @Test("关掉自动判对错后，黑白轮流自由下")
+    @Test("关掉 AI 陪下后，黑白轮流自由下")
     func freePlayWhenJudgingOff() async {
         let model = solvingModel()
         model.autoJudge = false

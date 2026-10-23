@@ -55,14 +55,21 @@ enum EngineSelfTest {
         let start = ContinuousClock.now
         var moves: [Point?] = []
         defer { log("\(problem.title)：\(name(moves)) 用时 \(ContinuousClock.now - start)") }
-        for _ in 0..<8 {
-            guard let move = await solver.correctMoves(moves).first else { return log("  找不到正解") }
+        for _ in 0..<16 {
+            // 正解里没有落子（最好的是停一手，比如对方认输停了一手）时，像孩子一样去收气、提子；
+            // 没有要吃的子，就下引擎最想下的那手。
+            // 对方刚停了一手（认输），就去提子。
+            var next = moves.last == .some(nil) ? await solver.captureMove(moves) : nil
+            if next == nil { next = await solver.correctMoves(moves).first }
+            if next == nil { next = await solver.captureMove(moves) }
+            if next == nil { next = await solver.suggestedMove(moves) }
+            guard let move = next else { return log("  找不到能下的地方") }
             moves.append(move)
             let verdict = await solver.judge(moves)
             guard verdict == .correct else { return log("  最后一手：\(verdict)") }
             moves.append(await solver.reply(moves))
         }
-        log("  下了 8 手还没做完")
+        log("  下了 16 手还没做完")
     }
 
     /// 打印一道题加了外框的样子，以及做题方先下、停一手时引擎考虑的下法。

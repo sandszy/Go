@@ -220,7 +220,12 @@ public struct ProblemEditorView: View {
                 .foregroundStyle(.secondary)
 
             if model.canJudge {
-                Toggle("自动判对错", isOn: $model.autoJudge)
+                Toggle("AI 陪下", isOn: $model.autoJudge)
+                Text(model.autoJudge
+                    ? "AI 判每一手的对错，并替\(model.problem.toPlay.opponent.name)棋应"
+                    : "自己两边下，随时可以再打开")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Toggle("落子前确认", isOn: $model.confirmMoves)
             if model.confirmMoves {

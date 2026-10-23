@@ -16,6 +16,8 @@ public actor EngineSolver {
         var direction: Double
         /// 做题方先下、双方都下最好时，它往 direction 那边倒了多少（归属乘 direction）。
         var best: Double
+        /// 这个子是谁的。对方的子 direction 为 1（最后归做题方）就是要吃掉的子。
+        var color: Stone
     }
 
     /// 比最好的下法亏这么多目以内都算对。外框让死活的差别至少有好几目，吃一个子也有两目。
@@ -25,6 +27,8 @@ public actor EngineSolver {
     static let settled = 0.5
     /// 做题方先下和停一手相比，归属变化超过这个值的子，就是题目要分死活的子。
     static let contested = 0.6
+    /// 做题方连着下对这么多手还没做完，也算答对，免得一直下下去。
+    static let maxMoves = 15
 
     public init(problem: Problem, engine: any GoEngine, visits: Int = 400) {
         self.problem = problem
@@ -46,7 +50,7 @@ public actor EngineSolver {
             score = max(score, estimate.scoreLead)
         }
         if before.scoreLead - score > Self.tolerance { return .wrong }
-        return await isFinished(after) ? .solved : .correct
+        return await isFinished(moves, after) ? .solved : .correct
     }
 
     /// 轮到对方时替对方选一手，nil 表示停一手。判题时已经算过这个局面，直接用那次的结果。
@@ -60,6 +64,39 @@ public actor EngineSolver {
         _ = task(for: moves)
         // 开头还要算"做题方停一手"，用来找题目要分死活的子。
         if moves.isEmpty { _ = task(for: [nil]) }
+    }
+
+    /// 引擎在题目区域里最想下的一手（不算停一手）。以后做提示用；自测里在"最好是停一手"时
+    /// 用它代替孩子下，比如对方认输停了一手，孩子要接着去提子。
+    public func suggestedMove(_ moves: [Point?]) async -> Point? {
+        guard let analysis = try? await analysis(moves) else { return nil }
+        return analysis.candidates.lazy.compactMap(\.move).first { frame.area.contains($0) }
+    }
+
+    /// 去吃对方要被吃的那块棋：气最少的那块，紧它的一口气（能提就提）。
+    /// 对方认输停了一手以后，引擎觉得双方都停也行，没有落子的正解，孩子这时就该去收气、提子。
+    public func captureMove(_ moves: [Point?]) async -> Point? {
+        guard let keyStones = await findKeyStones(), let position = position(after: moves),
+              position.toPlay == problem.toPlay
+        else { return nil }
+        let opponent = problem.toPlay.opponent
+        let board = position.board
+        var groups: [Set<Point>] = []
+        for (p, stone) in keyStones where stone.color == opponent && stone.direction > 0 && board[p] == opponent {
+            if !groups.contains(where: { $0.contains(p) }) { groups.append(board.group(at: p)) }
+        }
+        for group in groups.sorted(by: { board.liberties(of: $0).count < board.liberties(of: $1).count }) {
+            let liberties = board.liberties(of: group).sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+            if let move = liberties.first(where: position.isLegal) { return move }
+        }
+        return nil
+    }
+
+    /// 还在棋盘上、要做题方吃掉的对方子有几个。对方认输停一手时，用来提醒孩子去提子。
+    public func targetsRemaining(_ moves: [Point?]) async -> Int {
+        guard let keyStones = await findKeyStones(), let board = position(after: moves)?.board else { return 0 }
+        let opponent = problem.toPlay.opponent
+        return keyStones.filter { $0.value.color == opponent && $0.value.direction > 0 && board[$0.key] == opponent }.count
     }
 
     /// 轮到做题一方时的正解。
@@ -91,12 +128,29 @@ public actor EngineSolver {
         let current = position(after: moves)?.board ?? frame.board
         let query = EngineQuery(
             board: frame.board, firstPlayer: problem.toPlay, moves: moves, komi: frame.komi, maxVisits: visits,
-            avoid: frame.distantPoints(on: current)
+            avoid: avoidedPoints(after: moves, on: current)
         )
         let engine = engine
         let task = Task { () async throws -> EngineAnalysis in try await engine.analyze(query) }
         analyses[moves] = task
         return task
+    }
+
+    /// 搜索时双方都不下的点。
+    /// 开头（第一手，以及找要分死活的子用的"停一手"）只避开离所有棋子两路以外的空地，不漏掉正解。
+    /// 下过以后，双方只在要分死活的那几块棋旁边一路以内下：收气、逃、打吃。
+    /// 不然对杀一定下来，输的一方会跑去题目区域别处下，双方在空地上来回走，孩子看不明白。
+    private func avoidedPoints(after moves: [Point?], on board: Board) -> [Point] {
+        let opening = moves.isEmpty || moves == [nil]
+        guard !opening, let keyStones, !keyStones.isEmpty else { return frame.distantPoints(on: board) }
+        var fight = Set<Point>()
+        for p in keyStones.keys where board[p] != nil {
+            fight.formUnion(board.group(at: p))
+        }
+        guard !fight.isEmpty else { return frame.distantPoints(on: board) }
+        return frame.area.points.filter { p in
+            board[p] == nil && !fight.contains { max(abs($0.x - p.x), abs($0.y - p.y)) <= 1 }
+        }
     }
 
     /// 引擎在题目区域里最想下的一手；它觉得停一手最好时返回 nil。
@@ -108,17 +162,33 @@ public actor EngineSolver {
         return nil
     }
 
-    /// 题目要分死活的那些子都已经倒向做题方，或者引擎让对方停一手，题目就做完了。
-    /// 不等对方真的被提掉：死活定了以后，引擎会去抢题目区域里的空地，一直下下去孩子会糊涂。
-    private func isFinished(_ after: EngineAnalysis) async -> Bool {
-        if analysisSuggestsPass(after) { return true }
-        guard let keyStones = await findKeyStones(), !keyStones.isEmpty else { return false }
+    /// 题目做完了没有。不是一倒向做题方就算完，要一直下到结果摆在棋盘上：
+    /// - 有要吃掉的对方子（对杀、吃子题里对方被吃的那块），要真的提掉；
+    /// - 没有要吃的子（做活、救自己的子），要分死活的子都定下来，而且对方已经没有要紧的手：
+    ///   引擎让对方停一手，或者对方最想下的地方离这块棋很远。
+    /// 做题方下对了 maxMoves 手还没完，也算做完。
+    private func isFinished(_ moves: [Point?], _ after: EngineAnalysis) async -> Bool {
+        let playerMoves = moves.indices.filter { $0.isMultiple(of: 2) }.count
+        if playerMoves >= Self.maxMoves { return true }
+        guard let keyStones = await findKeyStones(), !keyStones.isEmpty else { return analysisSuggestsPass(after) }
+        guard let board = position(after: moves)?.board else { return false }
+
+        let opponent = problem.toPlay.opponent
+        let targets = keyStones.filter { $0.value.color == opponent && $0.value.direction > 0 }.map(\.key)
+        if !targets.isEmpty {
+            return targets.allSatisfy { board[$0] != opponent }
+        }
+
         let size = problem.setup.size
         // after 是对方要下的局面，归属从对方来看，取反才是做题方的。
-        return keyStones.allSatisfy { p, stone in
+        let settled = keyStones.allSatisfy { p, stone in
             let leaning = -(after.ownership[safe: p.y * size + p.x] ?? 0) * stone.direction
             return leaning >= min(Self.settled, stone.best - 0.2)
         }
+        guard settled else { return false }
+        guard let best = after.candidates.first else { return true }
+        guard let move = best.move, frame.area.contains(move) else { return true }
+        return !keyStones.keys.contains { max(abs($0.x - move.x), abs($0.y - move.y)) <= 2 }
     }
 
     /// 题目要分死活的子，以及做题方先下时它们倒向哪边（1 是归做题方，-1 是归对方）。
@@ -135,7 +205,7 @@ public actor EngineSolver {
             let change = mine + theirs
             if abs(change) >= Self.contested {
                 let direction: Double = change > 0 ? 1 : -1
-                stones[p] = KeyStone(direction: direction, best: mine * direction)
+                stones[p] = KeyStone(direction: direction, best: mine * direction, color: problem.setup[p]!)
             }
         }
         keyStones = stones

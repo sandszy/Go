@@ -1,14 +1,14 @@
 /// 把题目外面的空棋盘填满，让引擎只关心题目这一块。
 ///
 /// 围棋引擎是按整盘棋下的：题目外面空着一大片时，它会觉得去别处占地更划算，局部的死活反而不管了。
-/// 所以在题目区域外面摆上两种颜色、都已经活净的棋子，再按两边的目数定贴目。
+/// 所以在题目区域外面摆上两种颜色、都已经活净的棋子，再按两边外框的目数定贴目。
 /// 这样全盘的输赢只取决于题目这一块，引擎算出的目数差就是这一块的得失。
 public struct TsumegoFrame: Sendable {
     /// 摆好外框以后的棋盘。题目区域里和原题一样。
     public let board: Board
     /// 留给题目的区域，区域外都是外框。
     public let area: BoardRegion
-    /// 让两边外框的目数大致相当的贴目（日本规则，按目数算）。
+    /// 让两边外框的目数大致相当的贴目（日本规则，数目：外框里的眼就是目）。
     public let komi: Double
 
     /// 题目区域外的空间太小、或者棋盘太小时不加外框，直接用原棋盘。
@@ -19,14 +19,16 @@ public struct TsumegoFrame: Sendable {
         let unframed = (board: setup, area: BoardRegion.full(size: size), komi: 6.5)
 
         let wall = Self.wallColor(for: problem)
-        var sides = Self.sideColors(for: problem, area: area)
-        if sides != nil {
-            // 各边分颜色的外框（对杀等）贴着棋子外面一路摆：题目里没子的空地留着的话，
-            // 两种颜色外框的交界处会空出一片，引擎觉得去那里占地比对杀划算。
-            // 吃子、逃子题不这样收紧：能不能跑出去和外面有多少空地有关。
+        switch problem.goal {
+        case .capturingRace, .connect, .cut, nil:
+            // 对杀等题的外框贴着棋子外面一路摆。题目里没子的空地留着的话，引擎觉得去那里占地比对杀划算；
+            // 输的一方也会往空地里跑，拖着孩子一路追。
+            // 吃子、逃子、做活、杀棋题不这样收紧：能不能跑出去、做不做得出眼，和外面有多少空地有关。
             area = BoardRegion.fitting(setup, margin: 1, snap: 1, minSpan: 1)
-            sides = Self.sideColors(for: problem, area: area)
+        case .capture, .escape, .live, .kill:
+            break
         }
+        let sides = Self.sideColors(for: problem, area: area)
         guard size >= 13, area.width * area.height * 2 <= size * size,
               let fill = Self.fill(setup: setup, area: area, sides: sides) ?? Self.fill(setup: setup, area: area, wall: wall)
         else {
@@ -149,14 +151,16 @@ public struct TsumegoFrame: Sendable {
         return finish(board, frame: Set(outside))
     }
 
-    /// 撒上眼位；外框的每一块都有两只眼才算摆好。贴目让两边外框的目数（眼）相当。
+    /// 撒上眼位；外框的每一块都有两只眼才算摆好。
+    /// 贴目让两边外框的目数（眼）相当，KataGo 的贴目最多 ±150。
     private static func finish(_ filled: Board, frame: Set<Point>) -> (board: Board, komi: Double)? {
         var board = filled
         let eyes = eyePoints(on: board, frame: frame)
         guard everyGroupLives(on: board, frame: frame, eyes: eyes) else { return nil }
         let blackEyes = eyes.filter { board[$0] == .black }.count
         for p in eyes { board[p] = nil }
-        return (board, Double(blackEyes * 2 - eyes.count) + 0.5)
+        let komi = Double(blackEyes * 2 - eyes.count) + 0.5
+        return (board, min(149.5, max(-149.5, komi)))
     }
 
     /// 区域外按离区域的远近分两圈：近的一圈是 wall 色，远的是另一色，每块都留出足够的眼。
