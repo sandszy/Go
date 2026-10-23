@@ -1,3 +1,12 @@
+/// 数目还是数子。
+public enum EngineRules: String, Sendable, Hashable {
+    /// 日本规则（数目）。做题用：往死棋上加子要亏目，输的一方会停一手认输，不会一直往外长、拖着孩子追；
+    /// 孩子收气、提死子每手只亏一目左右。（试过中国规则，输的一方会挣扎二三十手。）
+    case japanese
+    /// 中国规则（数子）。对弈用：收单官、提死子不亏，和最后数子的办法一致。
+    case chinese
+}
+
 /// 交给引擎分析的一个局面：起始棋盘加上之后下的每一手。
 /// 带着手顺而不是只给最后的棋盘，引擎才知道打劫时哪里不能马上提回。
 public struct EngineQuery: Sendable, Hashable {
@@ -5,24 +14,29 @@ public struct EngineQuery: Sendable, Hashable {
     public var firstPlayer: Stone
     /// nil 表示停一手。
     public var moves: [Point?]
+    public var rules: EngineRules
     public var komi: Double
     public var maxVisits: Int
     /// 搜索时双方都不下这些点。题目区域里离棋子很远的空地放在这里，引擎就不会去那里占地。
     public var avoid: [Point]
     /// 好几个请求同时在算时，数大的先算。提前猜着算的请求用负数，让给孩子正在等的那个。
     public var priority: Int
+    /// 要引擎回每个点的策略网络概率。对弈时 AI 放水要用。
+    public var includePolicy: Bool
 
     public init(
-        board: Board, firstPlayer: Stone, moves: [Point?] = [], komi: Double, maxVisits: Int, avoid: [Point] = [],
-        priority: Int = 0
+        board: Board, firstPlayer: Stone, moves: [Point?] = [], rules: EngineRules = .japanese, komi: Double, maxVisits: Int,
+        avoid: [Point] = [], priority: Int = 0, includePolicy: Bool = false
     ) {
         self.board = board
         self.firstPlayer = firstPlayer
         self.moves = moves
+        self.rules = rules
         self.komi = komi
         self.maxVisits = maxVisits
         self.avoid = avoid
         self.priority = priority
+        self.includePolicy = includePolicy
     }
 
     /// 现在轮到谁下。
@@ -52,12 +66,16 @@ public struct EngineAnalysis: Sendable {
     public var scoreLead: Double
     /// 每个点归谁：1 是轮到下的一方，-1 是对方。按 y * size + x 排。
     public var ownership: [Double]
+    /// 策略网络觉得每个点该下的概率，不搜索、只凭第一感觉。按 y * size + x 排，最后一个是停一手；下不了的点是 -1。
+    /// 没要（`includePolicy` 为 false）时是空的。
+    public var policy: [Double]
 
-    public init(candidates: [Candidate], winrate: Double, scoreLead: Double, ownership: [Double]) {
+    public init(candidates: [Candidate], winrate: Double, scoreLead: Double, ownership: [Double], policy: [Double] = []) {
         self.candidates = candidates
         self.winrate = winrate
         self.scoreLead = scoreLead
         self.ownership = ownership
+        self.policy = policy
     }
 }
 

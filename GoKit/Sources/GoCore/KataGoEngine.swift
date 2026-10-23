@@ -107,15 +107,16 @@ public enum KataGoProtocol {
             "initialStones": stones,
             "moves": moves,
             "initialPlayer": color(query.firstPlayer),
-            // 日本规则（数目）。往死棋上加子要亏目，输的一方会停一手认输，不会一直往外长、拖着孩子追；
-            // 孩子收气、提死子每手只亏一目左右，在判题的容许范围里。（试过中国规则，输的一方会挣扎二三十手。）
-            "rules": "japanese",
+            "rules": query.rules.rawValue,
             "komi": query.komi,
             "boardXSize": size,
             "boardYSize": size,
             "maxVisits": query.maxVisits,
             "includeOwnership": true,
         ]
+        if query.includePolicy {
+            object["includePolicy"] = true
+        }
         if query.priority != 0 {
             object["priority"] = query.priority
         }
@@ -161,7 +162,8 @@ public enum KataGoProtocol {
             }
         guard let winrate = number(root["winrate"]), let scoreLead = number(root["scoreLead"]) else { return nil }
         let ownership = (json["ownership"] as? [Any])?.compactMap(number) ?? []
-        return EngineAnalysis(candidates: candidates, winrate: winrate, scoreLead: scoreLead, ownership: ownership)
+        let policy = (json["policy"] as? [Any])?.compactMap(number) ?? []
+        return EngineAnalysis(candidates: candidates, winrate: winrate, scoreLead: scoreLead, ownership: ownership, policy: policy)
     }
 
     public static func vertex(_ p: Point, size: Int) -> String {

@@ -68,6 +68,23 @@ struct KataGoProtocolTests {
         #expect(guessed["priority"] as? Int == -1)
     }
 
+    @Test("请求按 query 写规则，要策略网络时带上 includePolicy；结果里的 policy 读出来")
+    func rulesAndPolicy() async throws {
+        let transport = FakeTransport { request in
+            let id = request["id"] as! String
+            return #"{"id":"\#(id)","moveInfos":[{"move":"C3","order":0,"visits":9,"winrate":0.5,"scoreLead":0}],"rootInfo":{"winrate":0.5,"scoreLead":0},"ownership":[],"policy":[0.25,-1,0.5]}"#
+        }
+        let engine = KataGoEngine(transport: transport)
+        let analysis = try await engine.analyze(EngineQuery(board: Board(size: 9), firstPlayer: .black, rules: .chinese, komi: 7.5, maxVisits: 10, includePolicy: true))
+        #expect(transport.requests.first?["rules"] as? String == "chinese")
+        #expect(transport.requests.first?["includePolicy"] as? Bool == true)
+        #expect(analysis.policy == [0.25, -1, 0.5])
+
+        _ = try await engine.analyze(EngineQuery(board: Board(size: 9), firstPlayer: .black, komi: 6.5, maxVisits: 10))
+        #expect(transport.requests.last?["rules"] as? String == "japanese")
+        #expect(transport.requests.last?["includePolicy"] == nil)
+    }
+
     @Test("不用的请求让引擎停下，等着的一方收到失败")
     func terminate() async throws {
         // 这个假引擎只回停下的命令：被停下的请求回一行空结果。
@@ -297,6 +314,88 @@ struct EngineSolverTests {
         #expect(await EngineSolver(problem: full, engine: passOnly).reply([]) == .pass)
         // 黑棋自己也不填眼。
         #expect(EngineSolver.isOwnEye(Point(0, 0), in: Position(board: board, toPlay: .black)))
+    }
+
+    // MARK: - 对弈
+
+    /// 9 路对弈：黑在 B9、A8，A9 是黑的眼。策略网络最想下 A9（填自己的眼），其次 E5、G3、C3；搜索最好的是 G3。
+    private func gameSolver(_ strength: AIStrength, best: Point? = Point(6, 6), seed: UInt64 = 1) -> EngineSolver {
+        var board = Board(size: 9)
+        board[Point(1, 0)] = .black
+        board[Point(0, 1)] = .black
+        return EngineSolver(problem: Problem(setup: board), engine: ScriptedEngine { _ in
+            var policy = [Double](repeating: -1, count: 82)
+            policy[0] = 0.9
+            policy[4 * 9 + 4] = 0.5
+            policy[6 * 9 + 6] = 0.3
+            policy[6 * 9 + 2] = 0.1
+            return EngineAnalysis(candidates: [.init(move: best, visits: 100, winrate: 0.5, scoreLead: 0)], winrate: 0.5, scoreLead: 0, ownership: [], policy: policy)
+        }, purpose: .game, strength: strength, seed: seed)
+    }
+
+    @Test("对弈的请求：中国规则、贴 7.5、整个棋盘都能下、带策略网络；开头不算停一手")
+    func gameQuery() async {
+        let engine = RecordingEngine { _ in
+            EngineAnalysis(candidates: [.init(move: Point(4, 4), visits: 100, winrate: 0.5, scoreLead: 0)], winrate: 0.5, scoreLead: 0, ownership: [])
+        }
+        let solver = EngineSolver(problem: Problem(setup: Board(size: 9)), engine: engine, purpose: .game)
+        #expect(solver.frame.area == .full(size: 9))
+        #expect(!solver.isOutside(Point(0, 0)))
+        await solver.prepare([])
+        #expect(await solver.score([Point(2, 2)]) == .loss(0))
+        let query = await engine.waitFor { $0.moves == [Point(2, 2)] }
+        #expect(query?.rules == .chinese)
+        #expect(query?.komi == 7.5)
+        #expect(query?.avoid == [])
+        #expect(query?.includePolicy == true)
+        #expect(!engine.queries.contains { $0.moves == [nil] })
+    }
+
+    @Test("放水：抽到的点里下策略网络最想下的那个，不抽填自己眼的点；同样的种子抽得一样")
+    func pickStrength() async {
+        // 能下的只有 E5、G3、C3 三个点，抽 5 个全抽到，下最想下的 E5；A9 是自己的眼，不下。
+        #expect(await gameSolver(.beginner).reply([]) == .play(Point(4, 4)))
+        #expect(await gameSolver(.novice).reply([]) == .play(Point(4, 4)))
+        let first = await gameSolver(.beginner, seed: 42).reply([])
+        #expect(await gameSolver(.beginner, seed: 42).reply([]) == first)
+    }
+
+    @Test("全力：下搜索出来最好的一手，不看策略网络；中途换档，下一手就用")
+    func fullStrength() async {
+        #expect(await gameSolver(.full).reply([]) == .play(Point(6, 6)))
+        let solver = gameSolver(.full)
+        await solver.setStrength(.beginner)
+        #expect(await solver.reply([]) == .play(Point(4, 4)))
+    }
+
+    @Test("对弈时引擎觉得停一手最好就停，不走闲棋")
+    func gamePass() async {
+        #expect(await gameSolver(.full, best: nil).reply([]) == .pass)
+        #expect(await gameSolver(.beginner, best: nil).reply([]) == .pass)
+    }
+
+    @Test("数子：引擎觉得归对方的子算死子，拿不准的算活的")
+    func countDead() async {
+        let board = Board(diagram: """
+            .X.O.
+            .X.O.
+            .X.O.
+            OX.O.
+            .X.O.
+            """)
+        let solver = EngineSolver(problem: Problem(setup: board), engine: ScriptedEngine { _ in
+            // 从轮到下的黑方看：A2 的白子归黑，是死子；D5 的白子拿不准（0.3），算活的。
+            var ownership = [Double](repeating: 0, count: 25)
+            ownership[3 * 5 + 0] = 0.9
+            ownership[0 * 5 + 3] = 0.3
+            return EngineAnalysis(candidates: [.init(move: nil, visits: 100, winrate: 0.5, scoreLead: 0)], winrate: 0.5, scoreLead: 0, ownership: ownership)
+        }, purpose: .game)
+        let count = await solver.count([])
+        #expect(count?.dead == [Point(0, 3)])
+        #expect(count?.black == 10)
+        #expect(count?.white == 10)
+        #expect(count?.komi == 7.5)
+        #expect(count?.judgedDead == true)
     }
 
     @Test("引擎出错时算不出来")

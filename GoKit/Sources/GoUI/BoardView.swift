@@ -24,6 +24,8 @@ public struct BoardView: View {
     public var highlighted: Set<Point>
     /// 用橙色虚线圈标出的点，比如识别照片时没认准的地方。
     public var uncertain: Set<Point>
+    /// 数子时每个点归谁，画成小方块：空点上，以及死子上（画对方的颜色）。
+    public var territory: [Point: Stone]
     public var showCoordinates: Bool
     public var onTap: ((Point) -> Void)?
 
@@ -35,6 +37,7 @@ public struct BoardView: View {
         ghost: GhostStone? = nil,
         highlighted: Set<Point> = [],
         uncertain: Set<Point> = [],
+        territory: [Point: Stone] = [:],
         showCoordinates: Bool = false,
         onTap: ((Point) -> Void)? = nil
     ) {
@@ -45,6 +48,7 @@ public struct BoardView: View {
         self.ghost = ghost
         self.highlighted = highlighted
         self.uncertain = uncertain
+        self.territory = territory
         self.showCoordinates = showCoordinates
         self.onTap = onTap
     }
@@ -85,6 +89,7 @@ public struct BoardView: View {
         if let ghost, region.contains(ghost.point), board[ghost.point] == nil {
             drawStone(ghost.stone, at: g.position(of: ghost.point), radius: radius, in: &context, opacity: 0.5)
         }
+        drawTerritory(in: &context, g, radius: radius)
         drawMarks(in: &context, g, radius: radius)
     }
 
@@ -197,6 +202,17 @@ public struct BoardView: View {
             .init(color: .white.opacity(0), location: 1),
         ])
         sheen.fill(glintPath, with: .radialGradient(glintGradient, center: glint, startRadius: 0, endRadius: glintRadius))
+    }
+
+    /// 小方块边长约为棋子直径的三分之一，黑方块描白边、白方块描黑边，放在哪种子上都看得清。
+    private func drawTerritory(in context: inout GraphicsContext, _ g: BoardGeometry, radius r: CGFloat) {
+        let side = r * 0.66
+        for (p, stone) in territory where region.contains(p) {
+            let c = g.position(of: p)
+            let square = Path(CGRect(x: c.x - side / 2, y: c.y - side / 2, width: side, height: side))
+            context.fill(square, with: .color(stone == .black ? .black : .white))
+            context.stroke(square, with: .color(stone == .black ? .white : .black), lineWidth: max(0.5, r * 0.05))
+        }
     }
 
     private func drawMarks(in context: inout GraphicsContext, _ g: BoardGeometry, radius r: CGFloat) {

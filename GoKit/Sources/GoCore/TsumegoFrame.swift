@@ -40,6 +40,13 @@ public struct TsumegoFrame: Sendable {
         komi = fill.komi
     }
 
+    /// 不加外框，整个棋盘都是区域。对弈用。
+    public init(whole board: Board, komi: Double) {
+        self.board = board
+        area = .full(size: board.size)
+        self.komi = komi
+    }
+
     /// 题目区域里离所有棋子都超过 distance 路的空点。
     /// 外框两种颜色交界的地方会空出一片，引擎觉得去那里占地比做题划算；搜索时让双方都不下这些点。
     /// 按当前局面算，逃子时棋子往外走，能下的范围也跟着走。

@@ -6,6 +6,8 @@ public struct ProblemEditorView: View {
     @Bindable private var model: ProblemEditorModel
     /// 家长选的思考深度，下次打开 App 还是这个。
     @AppStorage("engineDepth") private var storedDepth: EngineDepth = .standard
+    /// 家长选的对弈棋力，下次打开 App 还是这一档。
+    @AppStorage("aiStrength") private var storedStrength: AIStrength = .beginner
 
     public init(model: ProblemEditorModel) {
         self.model = model
@@ -24,6 +26,7 @@ public struct ProblemEditorView: View {
                     ghost: model.ghost,
                     highlighted: model.mode == .setup ? model.stonesWithoutLiberties : [],
                     uncertain: model.mode == .setup ? model.uncertainPoints : [],
+                    territory: model.territory,
                     showCoordinates: model.showCoordinates,
                     onTap: model.tap
                 )
@@ -39,6 +42,22 @@ public struct ProblemEditorView: View {
         }
         .background(Theme.background)
         .onChange(of: storedDepth, initial: true) { model.engineDepth = storedDepth }
+        .onChange(of: storedStrength, initial: true) { model.aiStrength = storedStrength }
+        .confirmationDialog("重新开始一盘？现在这盘就没了", isPresented: $model.isConfirmingNewGame, titleVisibility: .visible) {
+            Button("新的一盘", role: .destructive) { model.newGame() }
+        }
+        .confirmationDialog(
+            "换成 \(model.pendingGameSize ?? 9) 路会重新开始一盘，现在这盘就没了",
+            isPresented: Binding(
+                get: { model.pendingGameSize != nil },
+                set: { if !$0 { model.pendingGameSize = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("换成 \(model.pendingGameSize ?? 9) 路", role: .destructive) {
+                if let size = model.pendingGameSize { model.changeGameSize(to: size) }
+            }
+        }
         .confirmationDialog(
             "换棋盘大小会清空已摆的棋子",
             isPresented: Binding(
@@ -86,6 +105,7 @@ public struct ProblemEditorView: View {
             switch model.mode {
             case .setup: setupControls
             case .solve: solveControls
+            case .play: gameControls
             }
 
             Divider()
@@ -229,39 +249,157 @@ public struct ProblemEditorView: View {
                 .foregroundStyle(.secondary)
 
             if model.canJudge {
-                Toggle("AI 打分", isOn: $model.autoScore)
-                Text(model.autoScore
-                    ? "每一手显示比最好的下法亏几目"
-                    : "不显示分数，随时可以再打开")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Toggle("AI 陪下", isOn: $model.autoReply)
-                Text(model.autoReply ? "AI 替对手下" : "自己两边下")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                if model.autoScore || model.autoReply {
-                    Picker("思考深度", selection: $storedDepth) {
-                        ForEach(EngineDepth.allCases, id: \.self) { depth in
-                            Text(depth.name).tag(depth)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    Text("思考深度：\(storedDepth.detail)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+                engineControls
             } else if !model.hasEngine {
                 Text(model.judgeSummary)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Toggle("落子前确认", isOn: $model.confirmMoves)
-            if model.confirmMoves {
-                Text("点一下看位置，再点一次才落子")
+            confirmControls
+            Toggle("显示全盘", isOn: $model.showWholeBoard)
+        }
+    }
+
+    // MARK: - 对弈
+
+    private var gameControls: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                StoneIcon(stone: model.position.toPlay, size: 36)
+                Text("轮到\(model.position.toPlay.name)棋下")
+                    .font(.title2.weight(.bold))
+            }
+            if model.canJudge && model.autoReply {
+                Text("你执\(model.humanColor.name) · AI 执\(model.humanColor.opponent.name)")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    model.undo()
+                } label: {
+                    Label("悔棋", systemImage: "arrow.uturn.backward")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(!model.canUndo)
+
+                Button {
+                    model.redo()
+                } label: {
+                    Label("重做", systemImage: "arrow.uturn.forward")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(!model.canRedo)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            Button {
+                model.endAndCount()
+            } label: {
+                Label("结束，数子", systemImage: "flag.checkered")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(model.isThinking)
+
+            if !model.variationChoices.isEmpty {
+                variationControls
+            }
+
+            Text("黑提 \(model.position.blackCaptures) 子 · 白提 \(model.position.whiteCaptures) 子")
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            LabeledContent("棋盘") {
+                Picker("棋盘", selection: Binding(get: { model.gameSize }, set: { model.requestGameSize($0) })) {
+                    ForEach(Board.supportedSizes, id: \.self) { Text("\($0) 路").tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
+            }
+            LabeledContent("我执") {
+                Picker("我执", selection: $model.humanColor) {
+                    Text("黑").tag(Stone.black)
+                    Text("白").tag(Stone.white)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 140)
+            }
+            Button {
+                model.requestNewGame()
+            } label: {
+                Label("新的一盘", systemImage: "plus.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(model.isThinking)
+
+            if model.canJudge {
+                engineControls
+            } else {
+                Text("没有引擎，不能打分，AI 也不能陪下，只能两个人轮流下")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Toggle("显示全盘", isOn: $model.showWholeBoard)
+            confirmControls
+        }
+    }
+
+    // MARK: - 共用
+
+    /// 打分、陪下的开关和思考深度；对弈时还有 AI 棋力。
+    @ViewBuilder
+    private var engineControls: some View {
+        let game = model.mode == .play
+        Toggle("AI 打分", isOn: $model.autoScore)
+        Text(model.autoScore
+            ? "每一手显示比最好的下法亏几目"
+            : "不显示分数，随时可以再打开")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        Toggle("AI 陪下", isOn: $model.autoReply)
+        Text(model.autoReply ? "AI 替对手下" : (game ? "两个人轮流下" : "自己两边下"))
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        if game && model.autoReply {
+            Picker("AI 棋力", selection: $storedStrength) {
+                ForEach(AIStrength.allCases, id: \.self) { strength in
+                    Text(strength.name).tag(strength)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(storedStrength.detail)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        if model.autoScore || model.autoReply {
+            Picker("思考深度", selection: $storedDepth) {
+                ForEach(EngineDepth.allCases, id: \.self) { depth in
+                    Text(depth.name).tag(depth)
+                }
+            }
+            .pickerStyle(.segmented)
+            // 对弈时和棋力放在一起，说清楚深度管的是打分，不是 AI 让多少。
+            Text(game ? "思考深度：打分算得多仔细，越深越准、等得越久。\(storedDepth.detail)" : "思考深度：\(storedDepth.detail)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var confirmControls: some View {
+        Toggle("落子前确认", isOn: $model.confirmMoves)
+        if model.confirmMoves {
+            Text("点一下看位置，再点一次才落子")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 }

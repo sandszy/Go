@@ -9,6 +9,8 @@ public enum EditorMode: String, CaseIterable, Identifiable, Sendable {
     case setup
     /// 从摆好的局面开始按规则轮流下。
     case solve
+    /// 空棋盘开始和 AI 下一整盘，下完数子。
+    case play
 
     public var id: Self { self }
 
@@ -16,6 +18,7 @@ public enum EditorMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .setup: "摆题"
         case .solve: "做题"
+        case .play: "对弈"
         }
     }
 }
@@ -91,10 +94,10 @@ actor Judge {
     /// 留给题目的区域，区域外是引擎那边的外框，下在那里引擎不认。
     nonisolated let area: BoardRegion
 
-    /// 没有引擎或者棋盘是空的，就不用引擎。
-    init?(problem: Problem, engine: (any GoEngine)?, depth: EngineDepth) {
-        guard let engine, !problem.setup.isEmpty else { return nil }
-        solver = EngineSolver(problem: problem, engine: engine, depth: depth)
+    /// 没有引擎，或者做题时棋盘是空的，就不用引擎。对弈从空棋盘开始。
+    init?(problem: Problem, engine: (any GoEngine)?, depth: EngineDepth, purpose: EngineSolver.Purpose = .problem, strength: AIStrength = .full) {
+        guard let engine, purpose == .game || !problem.setup.isEmpty else { return nil }
+        solver = EngineSolver(problem: problem, engine: engine, depth: depth, purpose: purpose, strength: strength)
         area = solver.frame.area
     }
 
@@ -111,10 +114,28 @@ actor Judge {
         await solver.setDepth(depth)
     }
 
+    func setStrength(_ strength: AIStrength) async {
+        await solver.setStrength(strength)
+    }
+
+    func count(_ moves: [Point?]) async -> GameCount? {
+        await solver.count(moves)
+    }
+
     /// 轮到人下时先让引擎算着，下完就能马上打分。
     func prepare(_ moves: [Point?]) async {
         await solver.prepare(moves)
     }
+}
+
+/// 离开对弈时存下的一盘：变化树和跟着它的打分、提示、哪些手是 AI 下的。
+private struct GameSession {
+    var tree: GameTree
+    var judge: Judge?
+    var scores: [Int: MoveScore]
+    var aiMoves: Set<Int>
+    var notes: [Int: EditorMessage]
+    var count: GameCount?
 }
 
 /// 摆题和做题的状态。界面只读这里的属性、调这里的方法。
@@ -149,6 +170,26 @@ public final class ProblemEditorModel {
             Task { await judge.setDepth(depth) }
         }
     }
+    /// 这一盘对弈用几路棋盘。换大小就是开新的一盘，用 requestGameSize 换。
+    public private(set) var gameSize = 9
+    /// 等用户确认要换成的对弈棋盘大小。不为 nil 时界面弹出确认框。
+    public var pendingGameSize: Int?
+    /// 对弈时人执的颜色。中途改就是换边，这盘接着下；换完轮到 AI，AI 马上下。
+    public var humanColor: Stone = .black {
+        didSet { if humanColor != oldValue { switchesChanged() } }
+    }
+    /// 对弈时 AI 让多少。改了从 AI 的下一手开始用。
+    public var aiStrength: AIStrength = .beginner {
+        didSet {
+            guard aiStrength != oldValue, let judge else { return }
+            let strength = aiStrength
+            Task { await judge.setStrength(strength) }
+        }
+    }
+    /// 点了“结束，数子”的结果。接着下、悔棋就清掉。
+    public private(set) var gameCount: GameCount?
+    /// 为 true 时界面弹出“重新开始一盘”的确认框。
+    public var isConfirmingNewGame = false
     /// 有引擎（KataGo）。没有时不能打分，AI 也不应，只能自己两边下。
     public var hasEngine: Bool { engine != nil }
 
@@ -178,6 +219,10 @@ public final class ProblemEditorModel {
     public let homework: HomeworkStore?
 
     private var nextAlternateStone: Stone = .black
+    /// 这一盘对弈的空棋盘。对弈不动 problem，也不存作业本。
+    private var gameProblem = Problem(setup: Board(size: 9))
+    /// 离开对弈时存着的那一盘，回来接着下。只在内存里。
+    private var savedGame: GameSession?
     private let engine: (any GoEngine)?
     private var judge: Judge?
     private var scores: [Int: MoveScore] = [:]
@@ -197,12 +242,13 @@ public final class ProblemEditorModel {
     // MARK: - 显示
 
     public var position: Position { tree.position }
-    public var lastMove: Point? { mode == .solve ? tree.lastMove : nil }
+    public var lastMove: Point? { mode != .setup ? tree.lastMove : nil }
 
     public var displayedBoard: Board { mode == .setup ? problem.setup : position.board }
 
     /// 从照片识别的题按作业纸上印的那一块显示；手摆的题摆题时显示全盘，做题时只显示棋子所在的局部。
     public var region: BoardRegion {
+        if mode == .play { return .full(size: gameProblem.setup.size) }
         if showWholeBoard { return .full(size: problem.setup.size) }
         if let region = problem.region { return region }
         return mode == .setup ? .full(size: problem.setup.size) : .fitting(problem.setup)
@@ -211,8 +257,8 @@ public final class ProblemEditorModel {
     /// 题目印的字只在原来那颗子还在时显示；做题时，试过几种下法的地方标上 A、B……
     public var displayedLabels: [Point: String] {
         let board = displayedBoard
-        var labels = problem.labels.filter { board[$0.key] == problem.setup[$0.key] }
-        guard mode == .solve else { return labels }
+        var labels = mode == .play ? [:] : problem.labels.filter { board[$0.key] == problem.setup[$0.key] }
+        guard mode != .setup else { return labels }
         let children = tree.current.children
         if children.count >= 2 {
             for (index, child) in children.enumerated() {
@@ -225,7 +271,7 @@ public final class ProblemEditorModel {
     }
 
     public var ghost: GhostStone? {
-        guard mode == .solve, let pending else { return nil }
+        guard mode != .setup, let pending else { return nil }
         return GhostStone(point: pending, stone: position.toPlay)
     }
 
@@ -240,11 +286,22 @@ public final class ProblemEditorModel {
         return saved.problem == problem ? .saved : .modified
     }
 
-    public var canUndo: Bool { mode == .solve && !isThinking && tree.canUndo }
-    public var canRedo: Bool { mode == .solve && !isThinking && tree.canRedo }
+    /// 对弈执白时，AI 先下的第一手退不掉：退了 AI 还得再下。
+    public var canUndo: Bool {
+        guard mode != .setup, !isThinking, tree.canUndo else { return false }
+        return !(mode == .play && isReplyEnabled && aiMoves.contains(tree.currentID) && tree[tree.currentID].parent == GameTree.rootID)
+    }
+    public var canRedo: Bool { mode != .setup && !isThinking && tree.canRedo }
 
-    /// 这道题能不能用引擎打分、陪下。
-    public var canJudge: Bool { engine != nil && !problem.setup.isEmpty }
+    /// 这道题（或这一盘）能不能用引擎打分、陪下。对弈从空棋盘开始也能用。
+    public var canJudge: Bool { engine != nil && (mode == .play || !problem.setup.isEmpty) }
+
+    /// 对弈时数子的方块：空点和死子归谁。活子上不画。
+    public var territory: [Point: Stone] {
+        guard mode == .play, let gameCount else { return [:] }
+        let board = position.board
+        return gameCount.owner.filter { board[$0.key] == nil || gameCount.dead.contains($0.key) }
+    }
 
     /// 告诉家长用什么打分。
     public var judgeSummary: String {
@@ -254,7 +311,7 @@ public final class ProblemEditorModel {
 
     /// 当前这一步可以切换的变化。AI 陪下时以人下的那一手为准，AI 的应手跟着走。
     public var variationChoices: [VariationChoice] {
-        guard mode == .solve, let node = branchNode, let parent = tree[node].parent else { return [] }
+        guard mode != .setup, let node = branchNode, let parent = tree[node].parent else { return [] }
         let siblings = tree[parent].children
         guard siblings.count >= 2 else { return [] }
         return siblings.enumerated().map { index, id in
@@ -266,16 +323,25 @@ public final class ProblemEditorModel {
 
     public func switchMode(to newMode: EditorMode) {
         guard newMode != mode else { return }
+        if mode == .play {
+            // AI 正在想的那手先停下，回来再接着想。
+            cancelWork()
+            savedGame = GameSession(tree: tree, judge: judge, scores: scores, aiMoves: aiMoves, notes: notes, count: gameCount)
+        }
         mode = newMode
-        if newMode == .solve {
+        pending = nil
+        message = nil
+        switch newMode {
+        case .solve:
             // 作业本里有这道题时，校对改过的地方跟着存回去。
             if saveState == .modified { saveProblem() }
             restart()
-        } else {
+        case .play:
+            if let savedGame { restore(savedGame) } else { newGame() }
+        case .setup:
             cancelWork()
+            gameCount = nil
         }
-        pending = nil
-        message = nil
     }
 
     public func select(_ newTool: SetupTool) {
@@ -286,7 +352,7 @@ public final class ProblemEditorModel {
     public func tap(_ p: Point) {
         switch mode {
         case .setup: edit(p)
-        case .solve: play(p)
+        case .solve, .play: play(p)
         }
     }
 
@@ -413,16 +479,76 @@ public final class ProblemEditorModel {
         afterNavigation()
     }
 
-    /// 回到摆好的局面重新做，之前试过的变化都清掉。
+    /// 回到摆好的局面重新做，之前试过的变化都清掉。对弈时是同样设置的一盘新棋。
     public func restart() {
         cancelWork()
-        tree = GameTree(root: problem.startPosition)
-        judge = Judge(problem: problem, engine: engine, depth: engineDepth)
+        let start = mode == .play ? gameProblem : problem
+        tree = GameTree(root: start.startPosition)
+        judge = Judge(
+            problem: start, engine: engine, depth: engineDepth,
+            purpose: mode == .play ? .game : .problem, strength: aiStrength
+        )
         scores = [:]
         aiMoves = []
         notes = [:]
         afterNavigation()
-        if isUsingEngine, let judge { Task { await judge.prepare([]) } }
+        // 对弈执白时 AI 先下；别的情况先替人的第一手算着。
+        resume()
+    }
+
+    /// 按现在的棋盘大小，从空棋盘开始一盘新的对弈。
+    public func newGame() {
+        isConfirmingNewGame = false
+        savedGame = nil
+        gameProblem = Problem(setup: Board(size: gameSize))
+        restart()
+    }
+
+    /// 已经下了子，先确认，免得误点把这盘弄没了。
+    public func requestNewGame() {
+        if gameHasMoves {
+            isConfirmingNewGame = true
+        } else {
+            newGame()
+        }
+    }
+
+    /// 对弈时换棋盘大小：还没下子直接换；下了子先记下来，等用户确认会重新开始一盘。
+    public func requestGameSize(_ size: Int) {
+        guard size != gameSize else { return }
+        if gameHasMoves {
+            pendingGameSize = size
+        } else {
+            changeGameSize(to: size)
+        }
+    }
+
+    public func changeGameSize(to size: Int) {
+        pendingGameSize = nil
+        gameSize = size
+        newGame()
+    }
+
+    /// 结束这一盘，按中国规则数子。有引擎时引擎判死子；没有引擎或者引擎出错，棋盘上的子都算活的。
+    public func endAndCount() {
+        guard mode == .play, !isThinking else { return }
+        pending = nil
+        let board = position.board
+        let komi = EngineSolver.gameKomi
+        guard let judge else {
+            show(GameCount(board: board, komi: komi, judgedDead: false))
+            return
+        }
+        let moves = self.moves
+        let node = tree.currentID
+        isThinking = true
+        message = nil
+        work = Task {
+            let count = await judge.count(moves)
+            guard !Task.isCancelled, tree.currentID == node else { return }
+            isThinking = false
+            show(count ?? GameCount(board: board, komi: komi, judgedDead: false))
+        }
     }
 
     public func selectVariation(_ id: Int) {
@@ -447,6 +573,33 @@ public final class ProblemEditorModel {
 
     private var isReplyEnabled: Bool { autoReply && judge != nil }
 
+    /// 对弈时 AI 执的颜色。
+    private var aiColor: Stone? { mode == .play ? humanColor.opponent : nil }
+
+    /// 这一盘已经下了子（包括 AI 先下的那手）。
+    private var gameHasMoves: Bool { !tree[GameTree.rootID].children.isEmpty }
+
+    /// 回到存着的那一盘。离开时家长可能改过思考深度和棋力，按现在的设置接着算。
+    private func restore(_ game: GameSession) {
+        savedGame = nil
+        tree = game.tree
+        judge = game.judge
+        scores = game.scores
+        aiMoves = game.aiMoves
+        notes = game.notes
+        afterNavigation()
+        gameCount = game.count
+        if let count = game.count { message = EditorMessage(text: Self.countText(count), tone: .info) }
+        if let judge = game.judge {
+            let depth = engineDepth, strength = aiStrength
+            Task {
+                await judge.setDepth(depth)
+                await judge.setStrength(strength)
+            }
+        }
+        resume()
+    }
+
     /// 这时要不要用引擎：两个开关至少开一个。没有终点，一直打分、一直应；
     /// 只有一手下到了题目区域外面时停下（引擎那边那里是外框，算不了），悔掉那手才接着来。
     private var isUsingEngine: Bool {
@@ -456,16 +609,16 @@ public final class ProblemEditorModel {
 
     /// 开关变了：正在做的停下，按新的开关从眼前的局面接着来。
     private func switchesChanged() {
-        guard mode == .solve else { return }
+        guard mode != .setup else { return }
         cancelWork()
         resume()
     }
 
-    /// 最后一手是人下的，还缺分数或者缺 AI 的应手，就补上；否则轮到人下，先替下一手算着。
+    /// 最后一手是人下的，还缺分数或者缺 AI 的应手，就补上；对弈时轮到 AI 也让它下。否则轮到人下，先替下一手算着。
     private func resume() {
         guard isUsingEngine, !isThinking, let judge else { return }
         let node = tree.currentID
-        if tree.mover(of: node) != nil, !aiMoves.contains(node), needsWork(node) {
+        if needsWork(node) {
             start(node)
         } else {
             let next = moves
@@ -473,10 +626,21 @@ public final class ProblemEditorModel {
         }
     }
 
-    /// 人下的这一手还缺分数，或者 AI 陪下开着、还没应。
+    /// 人下的这一手还缺分数，或者该 AI 下了、还没下。
     private func needsWork(_ node: Int) -> Bool {
-        let replied = tree[node].children.contains { aiMoves.contains($0) }
-        return (autoScore && scores[node] == nil) || (autoReply && !replied)
+        (autoScore && isHumanMove(node) && scores[node] == nil) || needsReply(node)
+    }
+
+    /// 这一手是人下的（不是 AI 下的，也不是根节点）。
+    private func isHumanMove(_ node: Int) -> Bool {
+        tree.mover(of: node) != nil && !aiMoves.contains(node)
+    }
+
+    /// AI 陪下开着、该 AI 下了、还没下。做题时人下了 AI 就应；对弈时看轮到的是不是 AI 执的颜色，所以执白时 AI 先下。
+    private func needsReply(_ node: Int) -> Bool {
+        guard autoReply, !tree[node].children.contains(where: { aiMoves.contains($0) }) else { return false }
+        if let aiColor { return tree[node].position.toPlay == aiColor }
+        return isHumanMove(node)
     }
 
     /// AI 陪下时，当前是 AI 替对手下的那手就退到孩子下的那一手。
@@ -500,7 +664,13 @@ public final class ProblemEditorModel {
 
     private func afterNavigation() {
         pending = nil
+        gameCount = nil
         message = notes[tree.currentID]
+    }
+
+    private func show(_ count: GameCount) {
+        gameCount = count
+        message = EditorMessage(text: Self.countText(count), tone: .info)
     }
 
     private func cancelWork() {
@@ -556,6 +726,7 @@ public final class ProblemEditorModel {
         let using = isUsingEngine
         do throws(MoveError) {
             let result = try tree.play(p)
+            gameCount = nil
             let node = tree.currentID
             if aiMoves.remove(node) != nil {
                 // 以前 AI 在这里下过同一手，这回是孩子自己下的，当成新的一手。
@@ -579,8 +750,10 @@ public final class ProblemEditorModel {
     }
 
     /// 给人刚下的这一手打分（开着 AI 打分、还没打过分时），再替对手应（开着 AI 陪下时）。
+    /// 对弈执白时在根节点上调用：不打分，只让 AI 先下。
     private func start(_ node: Int) {
-        guard let judge, let mover = tree.mover(of: node) else { return }
+        guard let judge else { return }
+        let mover = tree.mover(of: node)
         let moves = self.moves
         let point = tree[node].move?.point
         if let point, !judge.area.contains(point) {
@@ -594,12 +767,13 @@ public final class ProblemEditorModel {
         }
         isThinking = true
         message = nil
-        let scoring = autoScore && scores[node] == nil
-        let replying = autoReply
+        let scoring = autoScore && isHumanMove(node) && scores[node] == nil
+        let replying = needsReply(node)
         let captured = tree[node].captured.count
-        let size = problem.setup.size
+        let size = tree.position.board.size
         let delay = replyDelay
-        let opponent = mover.opponent.name
+        let opponent = tree[node].position.toPlay.name
+        let game = mode == .play
         let start = ContinuousClock.now
 
         work = Task {
@@ -608,7 +782,7 @@ public final class ProblemEditorModel {
                 guard !Task.isCancelled, tree.currentID == node else { return }
                 scores[node] = score
             }
-            let score = autoScore ? scores[node] : nil
+            let score = autoScore && isHumanMove(node) ? scores[node] : nil
             var replyText: String?
             // 算不出分数时引擎多半也算不出应手，不替对方乱下。
             if replying, score != .unknown {
@@ -627,7 +801,10 @@ public final class ProblemEditorModel {
                     replyText = "\(opponent)棋没什么好下的了，走一步闲棋：\(Coordinates.name(of: p, size: size))"
                 case .pass:
                     tree.pass()
-                    replyText = "\(opponent)棋没地方下了，停一手"
+                    // 对弈时 AI 觉得下完了才停，提醒可以数子；做题时只有一个能下的点都没有才停。
+                    replyText = game
+                        ? "\(opponent)棋停一手，觉得没地方下了。可以点“结束，数子”"
+                        : "\(opponent)棋没地方下了，停一手"
                 }
                 aiMoves.insert(tree.currentID)
             }
@@ -640,14 +817,14 @@ public final class ProblemEditorModel {
     }
 
     /// 给人看的一句话：这一手的分数、提了几个子、对方应在哪。不说对错，颜色按分数上。
-    static func note(mover: Stone, point: Point?, size: Int, score: MoveScore?, captured: Int, reply: String?) -> EditorMessage {
+    static func note(mover: Stone?, point: Point?, size: Int, score: MoveScore?, captured: Int, reply: String?) -> EditorMessage {
         if score == .unknown {
             return EditorMessage(text: "这一手算不出来，可以接着下", tone: .info)
         }
         var parts: [String] = []
         var head = ""
         var tone = EditorMessage.Tone.info
-        if case let .loss(loss)? = score {
+        if case let .loss(loss)? = score, let mover {
             let name = point.map { Coordinates.name(of: $0, size: size) } ?? "停一手"
             head = "\(mover.name) \(name)：\(scoreText(loss))"
             tone = loss <= EngineSolver.tolerance ? .success : .warning
@@ -666,6 +843,20 @@ public final class ProblemEditorModel {
         guard tenths > 0 else { return "0 目" }
         let text = tenths.truncatingRemainder(dividingBy: 10) == 0 ? String(Int(tenths / 10)) : String(format: "%.1f", tenths / 10)
         return "−\(text) 目"
+    }
+
+    /// 数子的结果，比如"数子：黑 45，白 36，白贴 7.5，黑胜 1.5 目"。没判死子时提醒先提掉死子。
+    static func countText(_ count: GameCount) -> String {
+        let margin = count.margin
+        let winner = margin > 0 ? "黑胜" : "白胜"
+        var text = "数子：黑 \(count.black)，白 \(count.white)，白贴 \(number(count.komi))，\(winner) \(number(abs(margin))) 目"
+        if !count.judgedDead { text += "（没有判死子，死子要先提掉再数）" }
+        return text
+    }
+
+    /// 整数不写小数点，比如 7.5、2。
+    private static func number(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
 
     /// 从题目开始到现在下的每一手，nil 是停一手。

@@ -83,6 +83,33 @@ final class LayoutUITests: XCTestCase {
         attachScreenshot(named: "横屏-下了一手")
     }
 
+    /// 对弈：9 路空棋盘，两个人各下一手，点“结束，数子”，提示里有数子结果。
+    @MainActor
+    func testGameModeCounts() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        // 不用 KataGo：没有引擎时两个人轮流下，数子不判死子，结果固定。
+        app.launchArguments = ["-katagoHardware", "off"]
+        app.launch()
+        app.buttons["对弈"].tap()
+
+        // 9 路全盘，四周各留 0.75 路，一共 9.5 路宽。
+        let board = boardElement(in: app)
+        XCTAssertTrue(board.waitForExistence(timeout: 5))
+        for (x, y) in [(2, 2), (6, 6)] {
+            let point = board.coordinate(withNormalizedOffset: CGVector(dx: (0.75 + Double(x)) / 9.5, dy: (0.75 + Double(y)) / 9.5))
+            point.tap()
+            point.tap()
+        }
+        XCTAssertTrue(app.staticTexts["轮到黑棋下"].waitForExistence(timeout: 5))
+        app.buttons["结束，数子"].tap()
+
+        let result = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "数子：黑")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        XCTAssertTrue(result.isHittable, "数子结果应该不用滚动就能看到")
+        attachScreenshot(named: "竖屏-对弈数子")
+    }
+
     @MainActor
     private func boardElement(in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any)

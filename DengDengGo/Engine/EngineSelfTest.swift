@@ -10,9 +10,17 @@ import GoVision
 /// 再加 `-engineProblem <题号>` 只看那一道，并打印加了外框的棋盘和引擎考虑的每一手；
 /// `-engineVisits <次数>` 改每个局面算多少次（默认 400）。
 /// `-engineDepth quick|standard|deep` 按 App 里的思考深度做题（默认标准），打印孩子每下一手到对方应手用了多久。
+/// `-engineGame` 不用照片：9 路上每档棋力的 AI 和全力 AI 各下 40 手，打印每档平均每手亏几目，用来调档位。
 enum EngineSelfTest {
     static func runIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-engineGame") {
+            Task.detached {
+                if let engine = InProcessKataGo.shared { await game(engine: engine) } else { log("没有打包模型") }
+                exit(0)
+            }
+            return
+        }
         guard let index = arguments.firstIndex(of: "-engineSelfTest"), index + 1 < arguments.count else { return }
         let path = arguments[index + 1]
         let photo = path.hasPrefix("/") ? URL(fileURLWithPath: path) : URL.documentsDirectory.appending(path: path)
@@ -91,6 +99,36 @@ enum EngineSelfTest {
             }
             waits.append(ContinuousClock.now - tapped)
             await solver.prepare(moves)
+        }
+    }
+
+    /// 每档 AI 执黑，和全力 AI（执白）在 9 路上下 40 手，用这一档自己的分析给它的每手打分。
+    private static func game(engine: KataGoEngine) async {
+        log("引擎：\(engine.name)，思考深度 \(depth.name)")
+        for strength in AIStrength.allCases {
+            let problem = Problem(setup: Board(size: 9))
+            let tested = EngineSolver(problem: problem, engine: engine, depth: depth, purpose: .game, strength: strength)
+            let opponent = EngineSolver(problem: problem, engine: engine, depth: depth, purpose: .game, strength: .full)
+            var moves: [Point?] = []
+            var losses: [Double] = []
+            var waits: [Double] = []
+            for turn in 0..<40 {
+                let mine = turn.isMultiple(of: 2)
+                let clock = ContinuousClock.now
+                switch await (mine ? tested : opponent).reply(moves) {
+                case let .play(p), let .idle(p): moves.append(p)
+                case .pass: moves.append(nil)
+                }
+                if mine { waits.append((ContinuousClock.now - clock) / .seconds(1)) }
+                if mine, case let .loss(loss) = await tested.score(moves) { losses.append(loss) }
+                if moves.count >= 2, moves.suffix(2).allSatisfy({ $0 == nil }) { break }
+            }
+            let average = losses.isEmpty ? 0 : losses.reduce(0, +) / Double(losses.count)
+            log("\(strength.name)：\(losses.count) 手平均每手亏 \(String(format: "%.1f", average)) 目，最多 \(String(format: "%.1f", losses.max() ?? 0)) 目，AI 每手 \(String(format: "%.2f", waits.reduce(0, +) / Double(max(1, waits.count)))) 秒")
+            log("  \(moves.map { $0.map { KataGoProtocol.vertex($0, size: 9) } ?? "停" }.joined(separator: " "))")
+            if let count = await tested.count(moves) {
+                log("  数子：黑 \(count.black)，白 \(count.white)，黑领先 \(String(format: "%.1f", count.margin)) 目，死子 \(count.dead.count) 个")
+            }
         }
     }
 
