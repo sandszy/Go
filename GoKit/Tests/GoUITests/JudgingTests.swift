@@ -54,19 +54,32 @@ struct JudgingTests {
         #expect(model.position.toPlay == .black)
     }
 
-    @Test("没有终点：一直下，每手都打分，AI 没有要紧的地方就停一手")
+    @Test("没有终点：一直下，每手都打分，AI 每手都应")
     func noEnd() async {
+        let model = solvingModel()
+        model.tap(d2)
+        await model.waitUntilIdle()
+        for round in 1...3 {
+            // 找一个题目区域里能下的空点接着下。
+            let area = TsumegoFrame(problem: .sample).area
+            let p = area.points.first { model.position.isLegal($0) }!
+            model.tap(p)
+            await model.waitUntilIdle()
+            #expect(model.message?.text.hasPrefix("黑 \(Coordinates.name(of: p, size: 19))：") == true)
+            #expect(model.tree.path.count == 3 + 2 * round)
+            #expect(model.position.toPlay == .black)
+        }
+    }
+
+    @Test("AI 没有好棋下时不停一手，走一步闲棋，并说出来")
+    func idleMove() async {
         let model = solvingModel()
         model.tap(d2)
         await model.waitUntilIdle()
         model.tap(Point(1, 17))
         await model.waitUntilIdle()
-        #expect(model.message?.text == "黑 B2：0 目。白棋停了一手")
-        #expect(model.position.toPlay == .black)
-        model.tap(Point(0, 17))
-        await model.waitUntilIdle()
-        #expect(model.message?.text == "黑 A2：0 目。白棋停了一手")
-        #expect(model.tree.path.count == 7)
+        let idle = try? #require(model.lastMove)
+        #expect(model.message?.text == "黑 B2：0 目。白棋没什么好下的了，走一步闲棋：\(idle.map { Coordinates.name(of: $0, size: 19) } ?? "")")
         #expect(model.position.toPlay == .black)
     }
 
@@ -204,7 +217,7 @@ struct JudgingTests {
         let model = solvingModel(Problem(setup: board))
         model.tap(Point(3, 18))
         await model.waitUntilIdle()
-        #expect(model.message?.text == "黑 D1：−10 目，提掉 1 个子。白棋停了一手")
+        #expect(model.message?.text.hasPrefix("黑 D1：−10 目，提掉 1 个子。白棋没什么好下的了，走一步闲棋：") == true)
     }
 
     @Test("分数的写法：负数、一位小数，不到 0.05 目写 0")

@@ -160,7 +160,7 @@ struct EngineSolverTests {
     func scoreBest() async {
         let solver = solver()
         #expect(await solver.score([e2]) == .loss(0))
-        #expect(await solver.reply([e2]) == f1)
+        #expect(await solver.reply([e2]) == .play(f1))
     }
 
     @Test("亏几目就是几目：开头黑领先 10 目，D2 以后白领先 5 目，亏 15 目")
@@ -264,6 +264,39 @@ struct EngineSolverTests {
         let avoid = await engine.waitFor { $0.moves == [e2, f1] }?.avoid ?? []
         #expect(avoid.contains(Point(2, 13)), "离这块棋两路，开头能下，第一手以后不下")
         #expect(!avoid.contains(Point(2, 14)), "紧挨着这块棋，能下")
+    }
+
+    @Test("引擎觉得停一手最好时不停，从候选里挑区域里亏得最少的一手走闲棋")
+    func idleMoveInsteadOfPass() async {
+        let e2 = e2, c2 = Point(2, 17)
+        let solver = EngineSolver(problem: .sample, engine: ScriptedEngine { _ in
+            // 停一手最好；区域外的 A19 不挑；E2 上已经有子（黑 E2 以后）不挑；C2 能下。
+            EngineAnalysis(candidates: [
+                .init(move: nil, visits: 100, winrate: 0.5, scoreLead: 0),
+                .init(move: Point(0, 0), visits: 50, winrate: 0.5, scoreLead: -1),
+                .init(move: e2, visits: 40, winrate: 0.5, scoreLead: -1),
+                .init(move: c2, visits: 30, winrate: 0.5, scoreLead: -1),
+            ], winrate: 0.5, scoreLead: 0, ownership: [])
+        })
+        #expect(await solver.reply([e2]) == .idle(c2))
+    }
+
+    @Test("候选里没有能下的，就挑区域里贴着棋子的空点；一个能下的点都没有才停一手")
+    func passOnlyWhenNoMove() async {
+        let passOnly = ScriptedEngine { _ in
+            EngineAnalysis(candidates: [.init(move: nil, visits: 100, winrate: 0.5, scoreLead: 0)], winrate: 0.5, scoreLead: 0, ownership: [])
+        }
+        let reply = await EngineSolver(problem: .sample, engine: passOnly).reply([e2])
+        guard case let .idle(p) = reply else { Issue.record("应该走闲棋：\(reply)"); return }
+        #expect(TsumegoFrame(problem: .sample).area.contains(p))
+
+        // 9 路棋盘全是黑子，只留两个眼：白棋下哪里都是禁入点，只能停一手。
+        var board = Board(size: 9)
+        for p in board.allPoints where p != Point(0, 0) && p != Point(8, 8) { board[p] = .black }
+        let full = Problem(setup: board, toPlay: .white)
+        #expect(await EngineSolver(problem: full, engine: passOnly).reply([]) == .pass)
+        // 黑棋自己也不填眼。
+        #expect(EngineSolver.isOwnEye(Point(0, 0), in: Position(board: board, toPlay: .black)))
     }
 
     @Test("引擎出错时算不出来")

@@ -8,6 +8,16 @@ public enum MoveScore: Sendable, Equatable {
     case unknown
 }
 
+/// 替对方选的一手。
+public enum Reply: Sendable, Equatable {
+    /// 引擎认为最好的一手。
+    case play(Point)
+    /// 引擎觉得停一手最好，没什么好下的，走一步闲棋。
+    case idle(Point)
+    /// 一个能下的点都没有，只好停一手。
+    case pass
+}
+
 /// 用围棋引擎给每一手打分：题目外面摆上外框，比较这一手和引擎认为最好的一手差多少目。
 ///
 /// 不判对错，也不判做没做完：不需要知道"要吃哪块"，做活、杀棋、连接、切断都能打分，好不好由人看分数决定。
@@ -68,12 +78,27 @@ public actor EngineSolver {
         !frame.area.contains(p)
     }
 
-    /// 轮到对方时替对方选一手，nil 表示停一手。打分时已经算过这个局面，直接用那次的结果。
-    public func reply(_ moves: [Point?]) async -> Point? {
+    /// 轮到对方时替对方选一手。打分时已经算过这个局面，直接用那次的结果。
+    /// 引擎觉得停一手最好时不停，像真人一样走一步闲棋：对方还在下，一直停会让孩子以为出错了。
+    public func reply(_ moves: [Point?]) async -> Reply {
         dropGuesses(except: moves)
         _ = await findKeyStones()
-        guard let analysis = try? await analysis(moves) else { return nil }
-        return bestMove(in: analysis)
+        guard let analysis = try? await analysis(moves), let position = position(after: moves) else { return .pass }
+        if let best = bestMove(in: analysis) { return .play(best) }
+        // 先从引擎算过的候选里挑：按引擎排的顺序，亏得最少的在前，通常是收单官、补一手。
+        let idle: (Point) -> Bool = { self.frame.area.contains($0) && position.isLegal($0) && !Self.isOwnEye($0, in: position) }
+        if let move = analysis.candidates.lazy.compactMap(\.move).first(where: idle) { return .idle(move) }
+        // 候选里没有，就挑区域里离棋子最近的空点，像真人一样贴着棋下，不往远处空地扔。
+        let board = position.board
+        let stones = frame.area.points.filter { board[$0] != nil }
+        func distance(_ p: Point) -> Int { stones.map { max(abs($0.x - p.x), abs($0.y - p.y)) }.min() ?? 0 }
+        let fallback = frame.area.points.filter(idle).min { (distance($0), $0.y, $0.x) < (distance($1), $1.y, $1.x) }
+        return fallback.map(Reply.idle) ?? .pass
+    }
+
+    /// 填进去就是填自己的眼：四周都是自己的子（棋盘边不算）。
+    static func isOwnEye(_ p: Point, in position: Position) -> Bool {
+        position.board.neighbors(of: p).allSatisfy { position.board[$0] == position.toPlay }
     }
 
     /// 提前算好这个局面，人想下一手的时候引擎就在算了。

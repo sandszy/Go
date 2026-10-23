@@ -103,7 +103,7 @@ actor Judge {
         await solver.score(moves)
     }
 
-    func reply(_ moves: [Point?]) async -> Point? {
+    func reply(_ moves: [Point?]) async -> Reply {
         await solver.reply(moves)
     }
 
@@ -617,13 +617,17 @@ public final class ProblemEditorModel {
                 let wait = delay - (ContinuousClock.now - start)
                 if wait > .zero { try? await Task.sleep(for: wait) }
                 guard !Task.isCancelled, tree.currentID == node else { return }
-                if let reply {
-                    // 引擎只会从合法的下法里挑。
-                    _ = try? tree.play(reply)
-                    replyText = "\(opponent)棋应在 \(Coordinates.name(of: reply, size: size))"
-                } else {
+                // 引擎和闲棋都只从合法的下法里挑。
+                switch reply {
+                case let .play(p):
+                    _ = try? tree.play(p)
+                    replyText = "\(opponent)棋应在 \(Coordinates.name(of: p, size: size))"
+                case let .idle(p):
+                    _ = try? tree.play(p)
+                    replyText = "\(opponent)棋没什么好下的了，走一步闲棋：\(Coordinates.name(of: p, size: size))"
+                case .pass:
                     tree.pass()
-                    replyText = "\(opponent)棋停了一手"
+                    replyText = "\(opponent)棋没地方下了，停一手"
                 }
                 aiMoves.insert(tree.currentID)
             }

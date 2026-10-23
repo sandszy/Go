@@ -84,7 +84,11 @@ enum EngineSelfTest {
                 return log("  最后一手：\(score)")
             }
             scores.append(String(format: "%.1f", loss))
-            moves.append(await solver.reply(moves))
+            switch await solver.reply(moves) {
+            case let .play(p): moves.append(p)
+            case let .idle(p): moves.append(p); log("  对方走闲棋 \(KataGoProtocol.vertex(p, size: 19))")
+            case .pass: moves.append(nil)
+            }
             waits.append(ContinuousClock.now - tapped)
             await solver.prepare(moves)
         }
