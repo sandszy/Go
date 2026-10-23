@@ -68,9 +68,7 @@ public struct BoardView: View {
     // MARK: - 绘制
 
     private func draw(in context: inout GraphicsContext, size: CGSize, geometry g: BoardGeometry) {
-        let background = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: g.spacing * 0.3)
-        context.fill(background, with: .color(Theme.wood))
-
+        drawBoardSurface(in: &context, size: size, g)
         drawGrid(in: &context, g)
         for p in board.starPoints where region.contains(p) {
             let c = g.position(of: p)
@@ -88,6 +86,31 @@ public struct BoardView: View {
             drawStone(ghost.stone, at: g.position(of: ghost.point), radius: radius, in: &context, opacity: 0.5)
         }
         drawMarks(in: &context, g, radius: radius)
+    }
+
+    /// 木纹底色：径向渐变 + 很淡的暗角，和图标用同一套胡桃木质感，不加纹理线以免干扰读盘。
+    private func drawBoardSurface(in context: inout GraphicsContext, size: CGSize, _ g: BoardGeometry) {
+        let shape = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: g.spacing * 0.3)
+        let center = CGPoint(x: size.width * 0.4, y: size.height * 0.32)
+        let radius = max(size.width, size.height) * 0.85
+        context.fill(shape, with: .radialGradient(Theme.woodGradient, center: center, startRadius: 0, endRadius: radius))
+
+        var vignette = context
+        vignette.blendMode = .multiply
+        let vignetteGradient = Gradient(stops: [
+            .init(color: .white, location: 0.0),
+            .init(color: .white, location: 0.62),
+            .init(color: Color(white: 0.8), location: 1.0),
+        ])
+        vignette.fill(
+            shape,
+            with: .radialGradient(
+                vignetteGradient,
+                center: CGPoint(x: size.width * 0.5, y: size.height * 0.5),
+                startRadius: 0,
+                endRadius: max(size.width, size.height) * 0.75
+            )
+        )
     }
 
     private func drawGrid(in context: inout GraphicsContext, _ g: BoardGeometry) {
@@ -143,21 +166,37 @@ public struct BoardView: View {
         opacity: Double = 1
     ) {
         let path = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-        let light = CGPoint(x: c.x - r * 0.35, y: c.y - r * 0.4)
-        var layer = context
-        layer.opacity = opacity
+        // 高光中心偏左上，棋子看起来像被从同一个方向打光，和图标一致。
+        let light = CGPoint(x: c.x - r * 0.34, y: c.y - r * 0.4)
+
+        // 棋子本体单独一层，阴影只加在这一层上。
+        var body = context
+        body.opacity = opacity
         if opacity == 1 {
-            layer.addFilter(.shadow(color: .black.opacity(0.35), radius: r * 0.1, x: r * 0.06, y: r * 0.1))
+            body.addFilter(.shadow(color: .black.opacity(0.4), radius: r * 0.12, x: r * 0.07, y: r * 0.12))
         }
         switch stone {
         case .black:
-            let gradient = Gradient(colors: [Color(white: 0.45), Color(white: 0.04)])
-            layer.fill(path, with: .radialGradient(gradient, center: light, startRadius: 0, endRadius: r * 1.3))
+            body.fill(path, with: .radialGradient(Theme.blackStoneGradient, center: light, startRadius: 0, endRadius: r * 1.25))
+            body.stroke(path, with: .color(Theme.blackStoneRim.opacity(0.25)), lineWidth: max(0.5, r * 0.02))
         case .white:
-            let gradient = Gradient(colors: [.white, Color(white: 0.8)])
-            layer.fill(path, with: .radialGradient(gradient, center: light, startRadius: r * 0.1, endRadius: r * 1.5))
-            layer.stroke(path, with: .color(Color(white: 0.45)), lineWidth: max(0.5, r * 0.04))
+            body.fill(path, with: .radialGradient(Theme.whiteStoneGradient, center: light, startRadius: r * 0.05, endRadius: r * 1.3))
+            body.stroke(path, with: .color(Theme.whiteStoneRim), lineWidth: max(0.5, r * 0.035))
         }
+
+        // 玻璃光斑另开一层，不能带阴影滤镜，不然亮斑自己会投出一圈灰影，白子上特别明显。
+        var sheen = context
+        sheen.opacity = opacity
+        sheen.clip(to: path)
+        let glint = CGPoint(x: c.x - r * 0.38, y: c.y - r * 0.44)
+        let glintRadius = r * 0.32
+        let glintPath = Path(ellipseIn: CGRect(x: glint.x - glintRadius, y: glint.y - glintRadius, width: glintRadius * 2, height: glintRadius * 2))
+        let glintGradient = Gradient(stops: [
+            .init(color: .white.opacity(stone == .black ? 0.5 : 0.65), location: 0),
+            .init(color: .white.opacity(stone == .black ? 0.15 : 0.2), location: 0.55),
+            .init(color: .white.opacity(0), location: 1),
+        ])
+        sheen.fill(glintPath, with: .radialGradient(glintGradient, center: glint, startRadius: 0, endRadius: glintRadius))
     }
 
     private func drawMarks(in context: inout GraphicsContext, _ g: BoardGeometry, radius r: CGFloat) {
