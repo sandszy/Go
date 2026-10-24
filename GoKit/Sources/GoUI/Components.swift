@@ -29,20 +29,20 @@ struct ToolIcon: View {
     var body: some View {
         switch tool {
         case .black:
-            StoneIcon(stone: .black)
+            StoneIcon(stone: .black, size: 22)
         case .white:
-            StoneIcon(stone: .white)
+            StoneIcon(stone: .white, size: 22)
         case .alternate:
-            HStack(spacing: -10) {
-                StoneIcon(stone: .black)
-                StoneIcon(stone: .white)
+            HStack(spacing: -8) {
+                StoneIcon(stone: .black, size: 22)
+                StoneIcon(stone: .white, size: 22)
             }
         case .erase:
             Image(systemName: "eraser")
-                .font(.system(size: 24))
+                .font(.system(size: 18))
         case .cycle:
             Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 24))
+                .font(.system(size: 18))
         }
     }
 }
@@ -86,13 +86,16 @@ struct ToolButton<Icon: View>: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 12)
+        let shape = RoundedRectangle(cornerRadius: 10)
         Button(action: action) {
-            VStack(spacing: 6) {
-                icon.frame(height: 30)
-                Text(title).font(.callout.weight(.medium))
+            VStack(spacing: 3) {
+                icon.frame(height: 22)
+                Text(title)
+                    .font(.footnote.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            .frame(maxWidth: .infinity, minHeight: 72)
+            .frame(maxWidth: .infinity, minHeight: 48)
             .background(shape.fill(selected ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05)))
             .overlay(shape.stroke(selected ? Color.accentColor : .clear, lineWidth: 2))
             .contentShape(shape)
