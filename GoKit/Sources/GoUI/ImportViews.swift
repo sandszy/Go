@@ -103,17 +103,25 @@ struct ImportControls: View {
 }
 
 /// 校对时对照的原图。
-struct ReferenceImage: View {
+/// accessory 放在“原图”标题那一行的右边：横屏时原图要一眼看到，原图上面不再加行（技术架构第 8 节）。
+struct ReferenceImage<Accessory: View>: View {
     let image: CGImage
+    @ViewBuilder var accessory: Accessory
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("原图").font(.headline)
-            Image(decorative: image, scale: 1)
+            HStack(spacing: 8) {
+                Text("原图").font(.headline)
+                Spacer(minLength: 0)
+                accessory
+            }
+            Image(image, scale: 1, label: Text("原图"))
                 .resizable()
                 .scaledToFit()
                 .frame(maxHeight: 240)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                // 界面测试靠它找原图，检查横屏时不用滚动就能看到。
+                .accessibilityIdentifier("原图")
         }
     }
 }

@@ -148,7 +148,9 @@ public struct ProblemEditorView: View {
             }
 
             if let reference = model.referenceImage {
-                ReferenceImage(image: reference)
+                ReferenceImage(image: reference) { incompleteControls }
+            } else if model.isIncompleteProblem {
+                HStack(spacing: 8) { incompleteControls }
             }
             if model.problem.region != nil {
                 Toggle("显示全盘", isOn: $model.showWholeBoard)
@@ -204,6 +206,20 @@ public struct ProblemEditorView: View {
         }
     }
 
+    /// 标着没拍全的题：提示和“已经全了”按钮，跟在“原图”标题后面，不另占一行。
+    @ViewBuilder private var incompleteControls: some View {
+        if model.isIncompleteProblem {
+            Label("没拍全，照着书补上缺的子", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(.orange)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Button("已经全了") { model.markComplete() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+    }
+
     private var boardSizeBinding: Binding<Int> {
         Binding(get: { model.problem.setup.size }, set: { model.requestBoardSize($0) })
     }
@@ -214,6 +230,12 @@ public struct ProblemEditorView: View {
         VStack(alignment: .leading, spacing: 16) {
             if !model.problem.title.isEmpty {
                 Text(model.problem.title).font(.headline)
+            }
+            // 开始时的提示下了子就换成打分，这一行一直留着，做题的人随时知道棋子可能不全。
+            if model.isIncompleteProblem {
+                Label("没拍全，缺的子要回“摆题”补上", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 12) {
@@ -246,11 +268,24 @@ public struct ProblemEditorView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
 
-            Button {
-                model.restart()
-            } label: {
-                Label("重新开始", systemImage: "arrow.counterclockwise")
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 12) {
+                Button {
+                    model.restart()
+                } label: {
+                    Label("重新开始", systemImage: "arrow.counterclockwise")
+                        .frame(maxWidth: .infinity)
+                }
+
+                // 作业本里的题才有下一道；最后一道时变灰。
+                if model.isHomeworkProblem {
+                    Button {
+                        model.startNextProblem()
+                    } label: {
+                        Label("下一题", systemImage: "arrow.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(model.nextHomeworkProblem == nil)
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.large)

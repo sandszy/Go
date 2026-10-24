@@ -45,7 +45,7 @@ public struct SavedProblem: Codable, Identifiable, Hashable, Sendable {
 @MainActor
 @Observable
 public final class HomeworkStore {
-    /// 新存的在前；同一天同一页的题按题号排。
+    /// 新的一天在前；同一天里先存的在前，一页里按题号排。做题时“下一题”也按这个顺序。
     public private(set) var problems: [SavedProblem] = []
     private let directory: URL
     @ObservationIgnored private var photos: [UUID: CGImage] = [:]
@@ -142,11 +142,15 @@ public final class HomeworkStore {
         directory.appending(path: "\(id.uuidString).\(ext)")
     }
 
+    /// 一天里按做作业的顺序：先拍的那页在前，一页里第一题在前。一页拍照存的题共用一个时间，同一时间按题目名排，
+    /// 题号按数字大小。以前的版本一页的题一道道存、各取各的时间，按从早到晚排也就是题号顺序。
     private func sort() {
-        problems.sort {
-            $0.saved != $1.saved
-                ? $0.saved > $1.saved
-                : $0.problem.title.localizedStandardCompare($1.problem.title) == .orderedAscending
+        let calendar = Calendar.current
+        problems.sort { a, b in
+            let dayA = calendar.startOfDay(for: a.saved), dayB = calendar.startOfDay(for: b.saved)
+            if dayA != dayB { return dayA > dayB }
+            if a.saved != b.saved { return a.saved < b.saved }
+            return a.problem.title.localizedStandardCompare(b.problem.title) == .orderedAscending
         }
     }
 

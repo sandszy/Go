@@ -515,6 +515,45 @@ public final class ProblemEditorModel {
         message = EditorMessage(text: "从作业本里拿出了\(saved.problem.title.isEmpty ? "这道题" : saved.problem.title)，点“做题”开始", tone: .info)
     }
 
+    /// 棋盘上这道题在作业本里。做题时只有这样才有“下一题”。
+    public var isHomeworkProblem: Bool {
+        homework?.contains(problem.id) ?? false
+    }
+
+    /// 作业本里排在这道后面的那道，做题时点“下一题”就做它。是最后一道、或者这道不在作业本里时没有。
+    public var nextHomeworkProblem: SavedProblem? {
+        guard let problems = homework?.problems, let index = problems.firstIndex(where: { $0.id == problem.id }),
+              index + 1 < problems.count else { return nil }
+        return problems[index + 1]
+    }
+
+    /// 作业本里标着没拍全。做题时一直提示，补不补由做题的人决定。
+    public var isIncompleteProblem: Bool {
+        homework?[problem.id]?.isIncomplete ?? false
+    }
+
+    /// 家长照着书补好了，或者核对过本来就是全的：去掉“没拍全”，现在棋盘上的子一起存回作业本。
+    /// 只改棋子不自动去掉：改了几颗不一定补全了，要家长自己确认。
+    public func markComplete() {
+        guard let homework, var saved = homework[problem.id] else { return }
+        saved.problem = problem
+        saved.isIncomplete = false
+        homework.save(saved)
+    }
+
+    /// 做题时直接开始做作业本里的下一道，不回摆题，也不用打开作业本。没拍全的照样开始，提示里说一声。
+    public func startNextProblem() {
+        guard mode == .solve, let next = nextHomeworkProblem else { return }
+        problem = next.problem
+        referenceImage = homework?.photo(for: next.id)
+        uncertainPoints = []
+        restart()
+        let title = next.problem.title
+        message = next.isIncomplete
+            ? EditorMessage(text: "\(title.isEmpty ? "这道题" : title)没拍全，缺的部分先回“摆题”照着书补上", tone: .warning)
+            : EditorMessage(text: title.isEmpty ? "开始做下一题" : "开始做\(title)", tone: .info)
+    }
+
     /// AI 陪下时，AI 替对方下的那手跟着一起退回，回到孩子自己的回合。
     public func undo() {
         guard canUndo else { return }
