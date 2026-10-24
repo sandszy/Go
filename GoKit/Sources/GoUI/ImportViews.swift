@@ -105,7 +105,6 @@ struct ImportControls: View {
 /// 校对时对照的原图。
 struct ReferenceImage: View {
     let image: CGImage
-    let hasUncertain: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -115,12 +114,6 @@ struct ReferenceImage: View {
                 .scaledToFit()
                 .frame(maxHeight: 240)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-            Text(hasUncertain
-                 ? "橙色圈是没认准的地方。用“轮换”工具点一下，在黑、白、空之间切换。"
-                 : "用“轮换”工具点一下，在黑、白、空之间切换。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
