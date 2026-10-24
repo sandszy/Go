@@ -69,6 +69,30 @@ struct GrayImage {
     }
 }
 
+extension GrayImage {
+    /// 线点：比两侧 distance 像素处都暗——亮度不到两侧较暗那一侧的 ratio，并且至少暗 contrast 级灰度。
+    /// 横线看上下两侧，竖线看左右两侧。线糊成浅灰的宽带也还是比两侧暗；灰底框的边一侧暗一侧亮，不算。
+    /// 要求暗出 contrast 级，是为了不把深色桌面、照片边上暗处的纹理当成线。
+    func ridges(distance d: Int, ratio: Double = 0.85, contrast: Double = 25) -> (horizontal: InkMask, vertical: InkMask) {
+        var horizontal = [Bool](repeating: false, count: width * height)
+        var vertical = [Bool](repeating: false, count: width * height)
+        for y in 0..<height {
+            for x in 0..<width {
+                let value = Double(pixels[y * width + x])
+                if y >= d && y + d < height {
+                    let side = Double(min(pixels[(y - d) * width + x], pixels[(y + d) * width + x]))
+                    horizontal[y * width + x] = value < side * ratio && side - value >= contrast
+                }
+                if x >= d && x + d < width {
+                    let side = Double(min(pixels[y * width + x - d], pixels[y * width + x + d]))
+                    vertical[y * width + x] = value < side * ratio && side - value >= contrast
+                }
+            }
+        }
+        return (InkMask(width: width, height: height, bits: horizontal), InkMask(width: width, height: height, bits: vertical))
+    }
+}
+
 /// 每个像素是不是墨迹。越界当作纸。
 struct InkMask {
     let width: Int
@@ -84,55 +108,62 @@ struct InkMask {
     /// 斜着的线总有一个斜率跟它差不多，能扫出够长的一段。
     static let scanSlopes: [Double] = [-0.1, -0.08, -0.06, -0.04, -0.02, 0, 0.02, 0.04, 0.06, 0.08, 0.1]
 
-    /// 只留下细的横线：上下 gap 像素处都是纸，且连续长度不少于 minLength。黑子内部、文字笔画会被去掉。
-    /// 和竖线交叉的地方上下也是墨迹，这种不超过 gap + 2 像素的短暂中断可以跨过去；黑子太宽，跨不过去。
-    /// 沿 scanSlopes 里的每个斜率各扫一遍（y = 起点 + 斜率 × x），合起来。
-    func thinHorizontalRuns(minLength: Int, gap: Int) -> InkMask {
-        var result = [Bool](repeating: false, count: width * height)
+    /// 只留下细的横线：线点图 ridges.along 上的点（比上下两侧都暗），连续长度够长。黑子内部、文字笔画不是线点，会被去掉。
+    /// 和竖线交叉的地方不一定是线点，这种墨迹（本身是墨，或者是竖线的线点）不超过 gap + 2 像素的短暂中断可以跨过去；
+    /// 黑子太宽，跨不过去。沿 scanSlopes 里的每个斜率各扫一遍（y = 起点 + 斜率 × x），合起来。
+    /// 一遍扫出两张图：不短于 minLengths.long 的长线（找棋盘图用），不短于 minLengths.short 的短线（定每条线的位置用）。
+    func thinHorizontalRuns(minLengths: (short: Int, long: Int), gap: Int, ridges: (along: InkMask, across: InkMask)) -> (short: InkMask, long: InkMask) {
+        var short = [Bool](repeating: false, count: width * height)
+        var long = [Bool](repeating: false, count: width * height)
         for slope in Self.scanSlopes {
             let reach = Int((abs(slope) * Double(width)).rounded(.up))
             for start in -reach..<(height + reach) {
                 func y(_ x: Int) -> Int { start + Int((slope * Double(x)).rounded()) }
-                scanRun(length: width, minLength: minLength, bridge: gap + 2) { x in
+                scanRun(length: width, minLength: minLengths.short, bridge: gap + 2) { x in
                     let y = y(x)
-                    guard self[x, y] else { return nil }
-                    return !self[x, y - gap] && !self[x, y + gap]
-                } mark: { x in
+                    if ridges.along[x, y] { return true }
+                    return self[x, y] || ridges.across[x, y] ? false : nil
+                } mark: { x, runLength in
                     let y = y(x)
-                    if y >= 0 && y < height { result[y * width + x] = true }
+                    guard y >= 0 && y < height else { return }
+                    short[y * width + x] = true
+                    if runLength >= minLengths.long { long[y * width + x] = true }
                 }
             }
         }
-        return InkMask(width: width, height: height, bits: result)
+        return (InkMask(width: width, height: height, bits: short), InkMask(width: width, height: height, bits: long))
     }
 
     /// 只留下细的竖线，和 thinHorizontalRuns 对称。
-    func thinVerticalRuns(minLength: Int, gap: Int) -> InkMask {
-        var result = [Bool](repeating: false, count: width * height)
+    func thinVerticalRuns(minLengths: (short: Int, long: Int), gap: Int, ridges: (along: InkMask, across: InkMask)) -> (short: InkMask, long: InkMask) {
+        var short = [Bool](repeating: false, count: width * height)
+        var long = [Bool](repeating: false, count: width * height)
         for slope in Self.scanSlopes {
             let reach = Int((abs(slope) * Double(height)).rounded(.up))
             for start in -reach..<(width + reach) {
                 func x(_ y: Int) -> Int { start + Int((slope * Double(y)).rounded()) }
-                scanRun(length: height, minLength: minLength, bridge: gap + 2) { y in
+                scanRun(length: height, minLength: minLengths.short, bridge: gap + 2) { y in
                     let x = x(y)
-                    guard self[x, y] else { return nil }
-                    return !self[x - gap, y] && !self[x + gap, y]
-                } mark: { y in
+                    if ridges.along[x, y] { return true }
+                    return self[x, y] || ridges.across[x, y] ? false : nil
+                } mark: { y, runLength in
                     let x = x(y)
-                    if x >= 0 && x < width { result[y * width + x] = true }
+                    guard x >= 0 && x < width else { return }
+                    short[y * width + x] = true
+                    if runLength >= minLengths.long { long[y * width + x] = true }
                 }
             }
         }
-        return InkMask(width: width, height: height, bits: result)
+        return (InkMask(width: width, height: height, bits: short), InkMask(width: width, height: height, bits: long))
     }
 
     /// 沿一行（或一列）扫描。thin 返回 nil 表示纸，true 表示细线上的墨迹，false 表示墨迹但不细。
-    /// 不细的墨迹连续不超过 bridge 个可以跨过；够长的一段细线整段标记。
-    private func scanRun(length: Int, minLength: Int, bridge: Int, thin: (Int) -> Bool?, mark: (Int) -> Void) {
+    /// 不细的墨迹连续不超过 bridge 个可以跨过；不短于 minLength 的一段细线整段标记，同时告诉这段有多长。
+    private func scanRun(length: Int, minLength: Int, bridge: Int, thin: (Int) -> Bool?, mark: (Int, Int) -> Void) {
         var start = -1, lastThin = -1, notThin = 0
         func finish() {
             if start >= 0, lastThin - start + 1 >= minLength {
-                for i in start...lastThin { mark(i) }
+                for i in start...lastThin { mark(i, lastThin - start + 1) }
             }
             start = -1
             notThin = 0
@@ -150,6 +181,33 @@ struct InkMask {
             }
         }
         finish()
+    }
+
+    /// 每个墨点往四周扩 radius 像素（正方形）。
+    func dilated(by radius: Int) -> InkMask {
+        var rows = [Bool](repeating: false, count: width * height)
+        for y in 0..<height {
+            var last = -radius - 1
+            for x in 0..<min(width, radius) where bits[y * width + x] { last = x }
+            for x in 0..<width {
+                if x + radius < width && bits[y * width + x + radius] { last = x + radius }
+                if last >= x - radius { rows[y * width + x] = true }
+            }
+        }
+        var result = [Bool](repeating: false, count: width * height)
+        for x in 0..<width {
+            var last = -radius - 1
+            for y in 0..<min(height, radius) where rows[y * width + x] { last = y }
+            for y in 0..<height {
+                if y + radius < height && rows[(y + radius) * width + x] { last = y + radius }
+                if last >= y - radius { result[y * width + x] = true }
+            }
+        }
+        return InkMask(width: width, height: height, bits: result)
+    }
+
+    func subtracting(_ other: InkMask) -> InkMask {
+        InkMask(width: width, height: height, bits: zip(bits, other.bits).map { $0 && !$1 })
     }
 
     func union(_ other: InkMask) -> InkMask {

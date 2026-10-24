@@ -14,11 +14,17 @@ public enum PageRecognizer {
         }
         // 窗口要比棋子大得多，黑子中间才不会被当成纸。
         let ink = gray.inkMask(window: max(31, gray.width / 12), ratio: 0.72)
+        // 线点图：比两侧都暗的点。手晃糊了的浅线按局部阈值不是墨，这里还在（技术架构 D19）。
+        let ridges = gray.ridges(distance: GridDetector.lineGap(width: gray.width))
         let toOriginal = Double(image.width) / Double(gray.width)
 
-        var diagrams = GridDetector.detect(in: ink).enumerated().map { index, grid in
-            makeDiagram(id: index, grid: grid, ink: ink, scale: toOriginal)
+        let found = GridDetector.detect(in: ink, ridges: ridges)
+        let made = found.grids.enumerated().map { index, grid in
+            makeDiagram(id: index, grid: grid, ink: ink, ridges: ridges, gray: gray, shadows: found.shadows, scale: toOriginal)
         }
+        var diagrams = made.map(\.diagram)
+        dropFaintBlacks(&diagrams, darkness: made.map(\.darkness))
+        clearShadowLines(&diagrams)
 
         // 按阅读顺序排：先上下（差不多一行的算同一行），再左右。练习册的题号也是这么排的。
         diagrams.sort { a, b in
@@ -67,7 +73,66 @@ public enum PageRecognizer {
         return nil
     }
 
-    private static func makeDiagram(id: Int, grid: DetectedGrid, ink: InkMask, scale: Double) -> RecognizedDiagram {
+    /// 印的黑子是实心的黑；铅笔印、橡皮屑是灰的，大小又和棋子差不多，墨迹图上分不出来。
+    /// 比一比黑子中间有多黑（和周围的纸比），比这一页大多数黑子浅得多的不是黑子，标成没认准。
+    /// 按这一页的黑子比，不定死一个数：光线暗、对比度低的照片，黑子也没那么黑。
+    static func dropFaintBlacks(_ diagrams: inout [RecognizedDiagram], darkness: [[GridPoint: Double]]) {
+        guard let typical = median(darkness.flatMap(\.values)) else { return }
+        let limit = max(0.33, typical * 1.6)
+        for index in diagrams.indices {
+            for (point, value) in darkness[index] where value > limit {
+                diagrams[index].stones[point.row][point.column] = nil
+                diagrams[index].uncertain.insert(point)
+            }
+        }
+    }
+
+    /// 书页卷得厉害时，挤在书缝阴影里的最外面一列会认成一整列黑子。题目不会在不是棋盘边的最外面一列（行）摆满黑子，
+    /// 这样的一列（行）三分之二以上是黑子的，整列清空，留成空点，标成没认准。
+    static func clearShadowLines(_ diagrams: inout [RecognizedDiagram]) {
+        for index in diagrams.indices {
+            let d = diagrams[index]
+            guard d.columns >= 3, d.rows >= 3 else { continue }
+            var lines: [[GridPoint]] = []
+            if !d.edges.contains(.left) { lines.append((0..<d.rows).map { GridPoint(column: 0, row: $0) }) }
+            if !d.edges.contains(.right) { lines.append((0..<d.rows).map { GridPoint(column: d.columns - 1, row: $0) }) }
+            if !d.edges.contains(.top) { lines.append((0..<d.columns).map { GridPoint(column: $0, row: 0) }) }
+            if !d.edges.contains(.bottom) { lines.append((0..<d.columns).map { GridPoint(column: $0, row: d.rows - 1) }) }
+            for line in lines {
+                let blacks = line.filter { d.stones[$0.row][$0.column] == .black }
+                guard blacks.count >= 3, blacks.count * 3 >= line.count * 2 else { continue }
+                for point in blacks {
+                    diagrams[index].stones[point.row][point.column] = nil
+                    diagrams[index].uncertain.insert(point)
+                }
+            }
+        }
+    }
+
+    /// 离中心 0.22 到 0.38 格那一圈的灰度中位数，除以周围（三格见方）的纸的亮度。
+    /// 不看正中间：黑子上印着白色的数字（❷）。铅笔印比棋子小，这一圈大半是纸。
+    private static func darkness(at center: (x: Double, y: Double), spacing s: Double, gray: GrayImage) -> Double {
+        var core: [UInt8] = [], around: [UInt8] = []
+        let reach = Int(s * 1.5), inner = s * 0.22, outer = s * 0.38
+        for dy in stride(from: -reach, through: reach, by: 2) {
+            for dx in stride(from: -reach, through: reach, by: 2) {
+                let x = Int(center.x) + dx, y = Int(center.y) + dy
+                guard x >= 0, y >= 0, x < gray.width, y < gray.height else { continue }
+                let d2 = Double(dx * dx + dy * dy)
+                if d2 >= inner * inner && d2 <= outer * outer { core.append(gray[x, y]) }
+                around.append(gray[x, y])
+            }
+        }
+        guard !core.isEmpty else { return 0 }
+        core.sort(); around.sort()
+        let paper = max(1, Double(around[around.count * 9 / 10]))
+        return Double(core[core.count / 2]) / paper
+    }
+
+    private static func makeDiagram(
+        id: Int, grid: DetectedGrid, ink: InkMask, ridges: (horizontal: InkMask, vertical: InkMask), gray: GrayImage, shadows: InkMask, scale: Double
+    ) -> (diagram: RecognizedDiagram, darkness: [GridPoint: Double]) {
+        var blacks: [GridPoint: Double] = [:]
         var stones: [[Stone?]] = []
         var uncertain = Set<GridPoint>()
         var marked: [GridPoint: CGPoint] = [:]
@@ -76,9 +141,13 @@ public enum PageRecognizer {
             var line: [Stone?] = []
             for column in grid.vertical.indices {
                 let center = grid.intersection(row: row, column: column)
-                let reading = StoneClassifier.classify(at: center, spacing: grid.spacing, ink: ink)
+                // 书缝的阴影离这个点不到 0.35 格。
+                let near = Int(grid.spacing * 0.35)
+                let onShadow = (-near...near).contains { dy in (-near...near).contains { dx in shadows[Int(center.x) + dx, Int(center.y) + dy] } }
+                let reading = StoneClassifier.classify(at: center, spacing: grid.spacing, ink: ink, ridges: ridges, onShadow: onShadow)
                 let point = GridPoint(column: column, row: row)
                 line.append(reading.stone)
+                if reading.stone == .black { blacks[point] = darkness(at: center, spacing: grid.spacing, gray: gray) }
                 if reading.uncertain { uncertain.insert(point) }
                 if reading.marked {
                     marked[point] = CGPoint(x: center.x * scale, y: center.y * scale)
@@ -88,7 +157,7 @@ public enum PageRecognizer {
             stones.append(line)
         }
         let b = grid.bounds
-        return RecognizedDiagram(
+        let diagram = RecognizedDiagram(
             id: id,
             number: nil,
             bounds: CGRect(x: b.minX * scale, y: b.minY * scale, width: (b.maxX - b.minX) * scale, height: (b.maxY - b.minY) * scale),
@@ -102,6 +171,7 @@ public enum PageRecognizer {
             oneShapedStones: ones,
             spacing: grid.spacing * scale
         )
+        return (diagram, blacks)
     }
 
     /// 题号印在棋盘图左上方：找图左边、靠近图顶的数字，离图左上角最近的那个。
@@ -135,7 +205,7 @@ public enum PageRecognizer {
     /// 还有没读出题号的，按阅读顺序从读出来的题号往前往后推。读出来的题号互相对不上、又分不出哪个是读错的时候不推，免得推错。
     /// 题号按版面上的格子排：练习册一页是几行几列整齐排的，题号从左到右、从上到下数。
     /// 没认出来的图也占着一个格子，所以按格子算，而不是按认出来的图数。
-    private static func fillNumberSequence(_ diagrams: inout [RecognizedDiagram]) {
+    static func fillNumberSequence(_ diagrams: inout [RecognizedDiagram]) {
         let slots = layoutSlots(of: diagrams)
         // 先看前后：前后两道题的题号差和格子差一样，中间这道的题号就定了。没读出来的补上，
         // 读错的（比如 23 只读出 "3"）改过来。
@@ -146,14 +216,27 @@ public enum PageRecognizer {
                 diagrams[index].number = before + slots[index] - slots[index - 1]
             }
         }
-        // 再看整页：读出来的题号大多是"格子号 + 同一个数"，没读出来的按这个补。读出来的题号都对得上，或者有三道以上、
-        // 超过一半对得上时，对不上的那道是读错了（比如排在最后的 18 只读出 "8"，前后夹不住），也按这个改。
-        let offsets = diagrams.indices.compactMap { index in diagrams[index].number.map { $0 - slots[index] } }
-        let counts = Dictionary(offsets.map { ($0, 1) }, uniquingKeysWith: +)
-        guard let (offset, agreeing) = counts.max(by: { $0.value < $1.value }), offset >= 1 else { return }
-        let fixWrong = counts.count > 1 && agreeing >= 3 && agreeing * 2 > offsets.count
-        guard counts.count == 1 || fixWrong else { return }
-        for index in diagrams.indices where diagrams[index].number.map({ $0 - slots[index] }) != offset {
+        // 再看整页：读出来的题号大多是"格子号 + 同一个数"，没读出来的按这个补，对不上的改过来。
+        // 带圈的两位数常常只读出一位（10 读成 "0"，19 读成 "1"），读出的是该有的题号的开头或结尾，也算对得上。
+        // 读出来的都对得上；或者有两道一字不差、超过一半对得上，就按这个数补齐、改正。
+        let reads = diagrams.indices.compactMap { index in diagrams[index].number.map { (slot: slots[index], value: $0) } }
+        func agreement(_ offset: Int) -> (exact: Int, total: Int) {
+            var exact = 0, total = 0
+            for read in reads {
+                let expected = String(read.slot + offset), value = String(read.value)
+                if read.slot + offset == read.value { exact += 1; total += 1 }
+                else if expected.hasPrefix(value) || expected.hasSuffix(value) { total += 1 }
+            }
+            return (exact, total)
+        }
+        let candidates = Set(reads.map { $0.value - $0.slot }).filter { $0 >= 1 }
+        guard let offset = candidates.max(by: { a, b in
+            let x = agreement(a), y = agreement(b)
+            return (x.total, x.exact, -a) < (y.total, y.exact, -b)
+        }) else { return }
+        let (exact, total) = agreement(offset)
+        guard total == reads.count || (exact >= 2 && total * 2 > reads.count) else { return }
+        for index in diagrams.indices {
             diagrams[index].number = offset + slots[index]
         }
     }
