@@ -1,12 +1,15 @@
 import GoCore
 import SwiftUI
 
-/// 作业本：按存进来的日子分组，点一道题放到棋盘上。
+/// 作业本：按存进来的日子分组，点一道题放到棋盘上。点“选择”可以选好几道、全选，一起删；例题删不掉。
 struct HomeworkBook: View {
     let homework: HomeworkStore
     let onSelect: (SavedProblem) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var deleting: SavedProblem?
+    @State private var isSelecting = false
+    @State private var selection = Set<UUID>()
+    @State private var isConfirmingBatch = false
 
     var body: some View {
         NavigationStack {
@@ -18,29 +21,67 @@ struct HomeworkBook: View {
                         description: Text("拍过的题会自动存在这里，手动摆的题点“保存这道题”")
                     )
                 } else {
-                    List {
+                    // 不在选择的时候不给 List 选中的绑定，点一行就是打开这道题。
+                    List(selection: isSelecting ? $selection : .constant([])) {
                         ForEach(days, id: \.day) { group in
                             Section(title(for: group.day)) {
                                 ForEach(group.problems) { saved in
-                                    Button {
-                                        onSelect(saved)
-                                    } label: {
-                                        HomeworkRow(saved: saved)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .swipeActions {
-                                        Button("删除", role: .destructive) { deleting = saved }
-                                    }
+                                    row(saved)
                                 }
                             }
+                        }
+                    }
+                    #if os(iOS)
+                    .environment(\.editMode, .constant(isSelecting ? .active : .inactive))
+                    #endif
+                    .safeAreaInset(edge: .bottom) {
+                        if isSelecting {
+                            Button(role: .destructive) {
+                                isConfirmingBatch = true
+                            } label: {
+                                Text("删除 \(selection.count) 道题").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                            .controlSize(.large)
+                            .disabled(selection.isEmpty)
+                            .padding()
+                            .background(.bar)
                         }
                     }
                 }
             }
             .navigationTitle("作业本")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                if isSelecting {
+                    ToolbarItem(placement: .cancellationAction) {
+                        let all = homework.deletableIDs
+                        Button(!all.isEmpty && selection == all ? "全不选" : "全选") {
+                            selection = selection == all ? [] : all
+                        }
+                        .disabled(all.isEmpty)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { stopSelecting() }
+                    }
+                } else {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("关闭") { dismiss() }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("选择") { isSelecting = true }
+                            .disabled(homework.deletableIDs.isEmpty)
+                    }
+                }
+            }
+            .confirmationDialog(
+                "从作业本里删掉选中的 \(selection.count) 道题？删了就找不回来了",
+                isPresented: $isConfirmingBatch,
+                titleVisibility: .visible
+            ) {
+                Button("删除", role: .destructive) {
+                    homework.delete(selection)
+                    stopSelecting()
                 }
             }
             .confirmationDialog(
@@ -53,6 +94,33 @@ struct HomeworkBook: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func row(_ saved: SavedProblem) -> some View {
+        if isSelecting {
+            // 选择的时候点一行只是选中，不打开题；例题那行不能选。
+            HomeworkRow(saved: saved, showsExampleNote: true)
+                .tag(saved.id)
+                .selectionDisabled(saved.isExample)
+        } else {
+            Button {
+                onSelect(saved)
+            } label: {
+                HomeworkRow(saved: saved, showsExampleNote: false)
+            }
+            .buttonStyle(.plain)
+            .swipeActions {
+                if !saved.isExample {
+                    Button("删除", role: .destructive) { deleting = saved }
+                }
+            }
+        }
+    }
+
+    private func stopSelecting() {
+        isSelecting = false
+        selection = []
     }
 
     private var days: [(day: Date, problems: [SavedProblem])] {
@@ -79,9 +147,10 @@ struct HomeworkBook: View {
     }
 }
 
-/// 作业本里的一行：小棋盘、题目名和谁先下。
+/// 作业本里的一行：小棋盘、题目名和谁先下。选择的时候例题那行写着不能删。
 private struct HomeworkRow: View {
     let saved: SavedProblem
+    let showsExampleNote: Bool
 
     var body: some View {
         let problem = saved.problem
@@ -95,6 +164,9 @@ private struct HomeworkRow: View {
                     .foregroundStyle(.secondary)
                 if saved.isIncomplete {
                     Text("没拍全").font(.footnote).foregroundStyle(.orange)
+                }
+                if showsExampleNote && saved.isExample {
+                    Text("例题不能删").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             Spacer()

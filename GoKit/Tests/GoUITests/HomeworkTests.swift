@@ -72,10 +72,53 @@ struct HomeworkTests {
         #expect(store.problems.map(\.problem.title) == ["例题：第 35 页第 7 题"])
         #expect(store.problems.first?.problem.setup == Problem.sample.setup)
 
-        store.delete(store.problems[0].id)
+        // 以前的版本里例题能删：文件没了也不再放回来。
+        try? FileManager.default.removeItem(at: directory.appending(path: "\(store.problems[0].id.uuidString).json"))
         let reopened = HomeworkStore(directory: directory)
         reopened.addExampleOnce()
         #expect(reopened.problems.isEmpty)
+    }
+
+    @Test("选好几道一起删；全选不选例题，混进来的例题也不删")
+    func deleteSeveral() {
+        let store = HomeworkStore(directory: directory)
+        store.addExampleOnce()
+        let problems = (7...9).map { SavedProblem(problem: Problem(title: "第 35 页第 \($0) 题")) }
+        for saved in problems { store.save(saved) }
+        let example = store.problems.first { $0.isExample }!
+        #expect(store.deletableIDs == Set(problems.map(\.id)))
+
+        store.delete([problems[0].id, problems[1].id, example.id])
+        #expect(Set(store.problems.map(\.id)) == [problems[2].id, example.id])
+        store.delete(store.deletableIDs)
+        #expect(store.problems.map(\.id) == [example.id])
+        #expect(HomeworkStore(directory: directory).problems.map(\.id) == [example.id])
+        #expect(store.deletableIDs.isEmpty)
+    }
+
+    @Test("例题删不掉；改过再存还是例题；以前存的例题文件按题目名认出来")
+    func exampleKept() throws {
+        let store = HomeworkStore(directory: directory)
+        store.addExampleOnce()
+        var example = try #require(store.problems.first)
+        store.delete(example.id)
+        #expect(store.problems.count == 1)
+
+        example.problem.title = "改了名字"
+        store.save(example)
+        #expect(HomeworkStore(directory: directory).problems.first?.isExample == true)
+
+        // 旧版本存的例题：文件里没有 example 这一项。
+        let old = SavedProblem(problem: Problem(title: "例题：第 35 页第 7 题"))
+        var json = try #require(String(data: JSONEncoder().encode(old), encoding: .utf8))
+        json = json.replacingOccurrences(of: #","example":false"#, with: "").replacingOccurrences(of: #""example":false,"#, with: "")
+        #expect(!json.contains("example"))
+        try Data(json.utf8).write(to: directory.appending(path: "\(old.id.uuidString).json"))
+        let reopened = HomeworkStore(directory: directory)
+        #expect(reopened[old.id]?.isExample == true)
+        reopened.delete(old.id)
+        #expect(reopened[old.id] != nil)
+        #expect(SavedProblem(problem: Problem(title: "例题：自己摆的")).isExample == false, "新存的题不看题目名")
     }
 
     @Test("以前存的题照常读：七种题型读成三种，没写题型的是对杀")

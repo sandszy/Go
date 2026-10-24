@@ -17,16 +17,27 @@ public struct SavedProblem: Codable, Identifiable, Hashable, Sendable {
     /// 以前存的文件里没有这两项，读出来是 nil。
     public var page: Int?
     public var number: Int?
+    /// 第一次用时放进来的例题，删不掉。以前存的例题文件里没有这一项，读出来是 nil，按题目名认。
+    private var example: Bool?
 
     public var id: UUID { problem.id }
 
-    public init(problem: Problem, saved: Date = .now, hasPhoto: Bool = false, isIncomplete: Bool = false, page: Int? = nil, number: Int? = nil) {
+    /// 例题的题目名开头。
+    static let examplePrefix = "例题："
+
+    public var isExample: Bool {
+        get { example ?? problem.title.hasPrefix(Self.examplePrefix) }
+        set { example = newValue }
+    }
+
+    public init(problem: Problem, saved: Date = .now, hasPhoto: Bool = false, isIncomplete: Bool = false, page: Int? = nil, number: Int? = nil, isExample: Bool = false) {
         self.problem = problem
         self.saved = saved
         self.hasPhoto = hasPhoto
         self.isIncomplete = isIncomplete
         self.page = page
         self.number = number
+        self.example = isExample
     }
 }
 
@@ -88,17 +99,29 @@ public final class HomeworkStore {
         sort()
     }
 
-    /// 第一次用时放一道例题进作业本。只放一次，删了不再放回来。
+    /// 第一次用时放一道例题进作业本。只放一次：以前的版本里例题能删，删掉了就不再放回来。
     public func addExampleOnce() {
         let marker = directory.appending(path: ".例题已放")
         guard !FileManager.default.fileExists(atPath: marker.path) else { return }
         var example = Problem.sample
-        example.title = "例题：\(example.title)"
-        save(SavedProblem(problem: example))
+        example.title = SavedProblem.examplePrefix + example.title
+        save(SavedProblem(problem: example, isExample: true))
         FileManager.default.createFile(atPath: marker.path, contents: nil)
     }
 
+    /// 能删的题：除了例题都能删。全选时选的就是这些。
+    public var deletableIDs: Set<UUID> {
+        Set(problems.filter { !$0.isExample }.map(\.id))
+    }
+
+    /// 删掉好几道题。混进来的例题不删。
+    public func delete(_ ids: Set<UUID>) {
+        for id in ids { delete(id) }
+    }
+
+    /// 删一道题。例题删不掉。
     public func delete(_ id: UUID) {
+        guard self[id]?.isExample != true else { return }
         try? FileManager.default.removeItem(at: file(id, "json"))
         try? FileManager.default.removeItem(at: file(id, "jpg"))
         photos[id] = nil
