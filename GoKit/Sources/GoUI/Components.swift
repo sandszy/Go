@@ -101,3 +101,53 @@ struct ToolButton<Icon: View>: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
+
+/// 摆题/做题：全局唯一的顶层选择，做成木纹底+铜色滑块，比面板里其它分段控件明显"重"一级、
+/// 自带阴影浮起来，一眼能看出这块是单独的、更高一层的控件。
+struct ModeSwitcherBar: View {
+    let mode: EditorMode
+    let onSelect: (EditorMode) -> Void
+
+    @Namespace private var selection
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(EditorMode.allCases) { candidate in
+                segment(candidate)
+            }
+        }
+        .padding(5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(LinearGradient(gradient: Theme.modeBarGradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+        )
+        .overlay(Capsule(style: .continuous).strokeBorder(Theme.modeBarRim, lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 3)
+    }
+
+    private func segment(_ candidate: EditorMode) -> some View {
+        let isSelected = candidate == mode
+        return Button {
+            guard !isSelected else { return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                onSelect(candidate)
+            }
+        } label: {
+            Text(candidate.name)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(isSelected ? .white : Theme.line)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background {
+                    if isSelected {
+                        Capsule(style: .continuous)
+                            .fill(Color.accentColor.gradient)
+                            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+                            .matchedGeometryEffect(id: "selectedMode", in: selection)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
