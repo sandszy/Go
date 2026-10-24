@@ -148,7 +148,7 @@ public struct ProblemEditorView: View {
             }
 
             if let reference = model.referenceImage {
-                ReferenceImage(image: reference, hasUncertain: !model.uncertainPoints.isEmpty)
+                ReferenceImage(image: reference)
             }
             if model.problem.region != nil {
                 Toggle("显示全盘", isOn: $model.showWholeBoard)
