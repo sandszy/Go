@@ -136,7 +136,8 @@ public struct ProblemEditorView: View {
             TextField("题目名称，比如第 35 页第 7 题", text: $model.problem.title)
                 .textFieldStyle(.roundedBorder)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            // 5 个工具一排放完，省下来的高度留给下面的原图，横屏时不用滚动就能看到。
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
                 ForEach(SetupTool.allCases) { tool in
                     ToolButton(title: tool.name, selected: model.tool == tool) {
                         model.select(tool)

@@ -40,36 +40,46 @@ struct ImportControls: View {
                     ProgressView()
                     Text("正在认棋盘……").foregroundStyle(.secondary)
                 }
-            } else if let scanned = model.scannedPage, scanned.page.diagrams.count > 1 {
-                Button {
-                    model.isChoosingDiagram = true
-                } label: {
-                    Label("同一页选别的题", systemImage: "square.grid.2x2")
-                }
-                .buttonStyle(.bordered)
-            }
-
-            if model.homework != nil {
-                HStack(spacing: 12) {
-                    Button {
-                        model.isShowingHomework = true
-                    } label: {
-                        Label("作业本", systemImage: "books.vertical")
-                    }
-                    switch model.saveState {
-                    case .unsaved, .modified:
-                        Button {
-                            model.saveProblem()
-                        } label: {
-                            Label(model.saveState == .unsaved ? "保存这道题" : "保存修改", systemImage: "square.and.arrow.down")
+            } else {
+                // "选别的题"和"作业本"都是次要操作，合并成一排，不再各占一行，省竖直空间给下面的原图和棋盘。
+                let showPickOther = (model.scannedPage?.page.diagrams.count ?? 0) > 1
+                if showPickOther || model.homework != nil {
+                    HStack(spacing: 8) {
+                        if showPickOther {
+                            Button {
+                                model.isChoosingDiagram = true
+                            } label: {
+                                Label("选别的题", systemImage: "square.grid.2x2")
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
-                        .disabled(model.problem.setup.isEmpty)
-                    case .saved:
-                        Label("已存进作业本", systemImage: "checkmark")
-                            .foregroundStyle(.secondary)
+                        if model.homework != nil {
+                            Button {
+                                model.isShowingHomework = true
+                            } label: {
+                                Label("作业本", systemImage: "books.vertical")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            switch model.saveState {
+                            case .unsaved, .modified:
+                                Button {
+                                    model.saveProblem()
+                                } label: {
+                                    Label(model.saveState == .unsaved ? "保存" : "存修改", systemImage: "square.and.arrow.down")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .disabled(model.problem.setup.isEmpty)
+                            case .saved:
+                                Label("已存", systemImage: "checkmark")
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
                     }
+                    .buttonStyle(.bordered)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 }
-                .buttonStyle(.bordered)
             }
         }
         .onChange(of: photoItem) { _, item in
