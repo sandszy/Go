@@ -1,18 +1,20 @@
 import CoreGraphics
+import CoreText
 import Foundation
 import GoCore
 import Testing
 @testable import GoVision
 
 /// 画一张像练习册那样的棋盘图：白底黑线，棋盘边用粗线，没到边的一侧线条伸出去一点。
-/// rows 是字符画，X 黑、O 白、. 空，第一行是图的最上面。
+/// rows 是字符画，X 黑、O 白、. 空，第一行是图的最上面。给了 caption 时在图上面写一行字，像练习册的题目说明。
 private func drawDiagram(
     _ rows: [String],
     edges: DiagramEdges,
     spacing: CGFloat = 40,
     origin: CGPoint = CGPoint(x: 300, y: 250),
     rotation: CGFloat = 0,
-    canvas: CGSize = CGSize(width: 1600, height: 1200)
+    canvas: CGSize = CGSize(width: 1600, height: 1200),
+    caption: String? = nil
 ) -> CGImage {
     let context = CGContext(
         data: nil, width: Int(canvas.width), height: Int(canvas.height), bitsPerComponent: 8, bytesPerRow: 0,
@@ -20,6 +22,16 @@ private func drawDiagram(
     )!
     context.setFillColor(CGColor(gray: 0.97, alpha: 1))
     context.fill(CGRect(origin: .zero, size: canvas))
+    if let caption {
+        // 在翻转坐标以前写字，不然字是倒的。CGContext 原点在左下角，离上边 150 像素。
+        let font = CTFontCreateWithName("PingFangSC-Regular" as CFString, 48, nil)
+        let text = NSAttributedString(string: caption, attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0.1, alpha: 1),
+        ])
+        context.textPosition = CGPoint(x: 200, y: canvas.height - 150)
+        CTLineDraw(CTLineCreateWithAttributedString(text), context)
+    }
     // 换成左上角原点，和照片一样。
     context.translateBy(x: 0, y: canvas.height)
     context.scaleBy(x: 1, y: -1)
@@ -103,6 +115,26 @@ struct RecognitionTests {
         let found = try #require(try PageRecognizer.recognize(image).diagrams.first)
         #expect(diagram(found) == sampleDiagram)
         #expect(found.edges == [.left, .bottom])
+    }
+
+    @Test("照片转了方向：按页面上的字转正，左下角的题还贴在左下角", arguments: [1, 2, 3])
+    func uprightsTurnedPage(_ turns: Int) throws {
+        let page = drawDiagram(sampleDiagram, edges: [.left, .bottom], caption: "黑先，请找出对杀取胜的一手。")
+        let turned = try #require(PageOrientation.redraw(page, maxDimension: 1600, quarterTurns: turns))
+        #expect(PageOrientation.quarterTurns(of: turned) == (4 - turns) % 4)
+        let recognized = try PageRecognizer.recognize(PageOrientation.upright(turned))
+        let found = try #require(recognized.diagrams.first)
+        #expect(found.edges == [.left, .bottom])
+        #expect(diagram(found) == sampleDiagram)
+        #expect(recognized.toPlay == .black)
+    }
+
+    @Test("页面上没有字时看不出方向，照片不转")
+    func keepsPageWithoutText() throws {
+        let page = drawDiagram(sampleDiagram, edges: [.left, .bottom])
+        let turned = try #require(PageOrientation.redraw(page, maxDimension: 1600, quarterTurns: 2))
+        #expect(PageOrientation.quarterTurns(of: turned) == 0)
+        #expect(PageOrientation.quarterTurns(of: drawDiagram(sampleDiagram, edges: [.left, .bottom], caption: "黑先，请找出对杀取胜的一手。")) == 0)
     }
 
     @Test("放到 19 路棋盘的左下角，显示区域和印的一样")
@@ -237,15 +269,41 @@ struct MoreSamplePhotosTests {
         #expect(diagram(page.diagrams[5])[6] == "XOOXOXOX.")
     }
 
-    @Test("第 36 页：书页弯曲处反光，16、18 题认不出、14 题没拍全，都要告诉家长")
+    @Test("第 36 页：16、18 题反光，只认出左边几列，和 14 题一样标成没拍全，补成 9 列")
     func page36() throws {
         let page = try page("IMG_0326.HEIC")
         #expect(page.pageNumber == 36)
-        #expect(page.diagrams.map(\.number) == [13, 14, 15, 17])
-        #expect(page.diagrams.map(\.isIncomplete) == [false, true, false, false])
-        #expect(page.missingNumbers == [16])
+        #expect(page.diagrams.map(\.number) == [13, 14, 15, 16, 17, 18])
+        #expect(page.diagrams.map(\.isIncomplete) == [false, true, false, true, false, true])
+        #expect(page.missingNumbers == [])
+        #expect(page.diagrams.allSatisfy { $0.columns == 9 && $0.rows == 9 })
+        // 16 题认出来的左边 4 列，右边补的是空的。
+        #expect(diagram(page.diagrams[3])[3] == "..XX.....")
         // 17 题拍得最歪（横线斜率约 0.1）。
-        #expect(diagram(page.diagrams[3])[6] == ".OXXOOX.X")
+        #expect(diagram(page.diagrams[4])[6] == ".OXXOOX.X")
+    }
+
+    @Test("第 36 页另一张：14 题挨着书缝也认出来，16 题书缝的阴影不当白子，18 题横竖线距不一样也对")
+    func page36Again() throws {
+        let page = try page("IMG_0352.HEIC")
+        #expect(page.pageNumber == 36)
+        #expect(page.diagrams.map(\.number) == [13, 14, 15, 16, 17, 18])
+        #expect(page.diagrams.map(\.isIncomplete) == [false, true, false, false, false, false])
+        #expect(diagram(page.diagrams[3])[0] == ".........")
+        let eighteen = page.diagrams[5]
+        #expect(eighteen.columns == 9 && eighteen.rows == 9 && eighteen.edges == [.left, .bottom])
+        #expect(diagram(eighteen)[7] == "OXXOO.O..")
+    }
+
+    @Test("倒过来拍的照片转正以后，认出来的和正着拍的一样")
+    func turnedPhoto() throws {
+        let url = try #require(photo("IMG_0352.HEIC"))
+        let image = try #require(PhotoLoader.image(at: url))
+        let turned = try #require(PageOrientation.redraw(image, maxDimension: max(image.width, image.height), quarterTurns: 2))
+        let page = try PageRecognizer.recognize(PageOrientation.upright(turned))
+        #expect(page.pageNumber == 36)
+        #expect(page.diagrams.map(\.number) == [13, 14, 15, 16, 17, 18])
+        #expect(page.diagrams.allSatisfy { $0.edges == [.left, .bottom] })
     }
 
     @Test("扑：吃子题，照片下面露出半截的 11、12 题不要，题号圈和白子上的数字不当页码")
@@ -287,5 +345,33 @@ struct LayoutSlotTests {
     func slotsSkipMissingDiagram() {
         let diagrams = [diagram(13, x: 470, y: 400), diagram(14, x: 1260, y: 380), diagram(15, x: 465, y: 1010), diagram(nil, x: 440, y: 1615)]
         #expect(PageRecognizer.layoutSlots(of: diagrams) == [0, 1, 2, 4])
+    }
+}
+
+@Suite("没拍全")
+struct IncompleteTests {
+    private func diagram(_ id: Int, columns: Int, edges: DiagramEdges) -> RecognizedDiagram {
+        var stones = [[Stone?]](repeating: [Stone?](repeating: nil, count: columns), count: 9)
+        stones[8][0] = .black
+        return RecognizedDiagram(id: id, number: id, bounds: .zero, columns: columns, rows: 9, edges: edges, stones: stones, uncertain: [GridPoint(column: 0, row: 8)])
+    }
+
+    @Test("比同一页别的图少几列：从棋盘边那一侧量，补成一样大，补的是空点")
+    func padsToPageSize() {
+        var diagrams = (1...3).map { diagram($0, columns: 9, edges: [.left, .bottom]) } + [diagram(4, columns: 5, edges: [.left, .bottom]), diagram(5, columns: 8, edges: [.right, .bottom])]
+        PageRecognizer.markIncomplete(&diagrams)
+        #expect(diagrams.map(\.isIncomplete) == [false, false, false, true, true])
+        #expect(diagrams.allSatisfy { $0.columns == 9 && $0.stones.allSatisfy { $0.count == 9 } })
+        #expect(diagrams[3].stones[8] == [.black] + [Stone?](repeating: nil, count: 8), "左边是棋盘边，补在右边")
+        #expect(diagrams[4].stones[8][1] == .black, "右边是棋盘边，补在左边，原来的子往右挪")
+        #expect(diagrams[4].uncertain == [GridPoint(column: 1, row: 8)])
+    }
+
+    @Test("左右都不是棋盘边时不知道缺哪边，不补，只标没拍全")
+    func noPaddingWithoutEdge() {
+        var diagrams = (1...3).map { diagram($0, columns: 9, edges: [.left, .bottom]) } + [diagram(4, columns: 6, edges: [.bottom])]
+        PageRecognizer.markIncomplete(&diagrams)
+        #expect(diagrams[3].isIncomplete)
+        #expect(diagrams[3].columns == 6)
     }
 }

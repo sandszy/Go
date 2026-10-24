@@ -27,7 +27,9 @@ enum StoneClassifier {
             return Reading(stone: nil, uncertain: suspicious)
         }
 
-        let ring = ringFraction(at: center, s: s, ink: ink)
+        let (ring, shaded) = ringFraction(at: center, s: s, ink: ink)
+        // 白子的轮廓是一圈细线，外面就是纸。书缝的阴影、照片边上的暗处是一大片，轮廓外面还是墨，不是白子。
+        if shaded { return Reading(stone: nil, uncertain: true) }
         if ring >= 0.55 {
             return Reading(stone: .white, uncertain: suspicious, marked: fill >= 0.04)
         }
@@ -70,20 +72,27 @@ enum StoneClassifier {
     }
 
     /// 在 0.38 到 0.52 个线距的圆环上，有多少个方向碰到了墨迹（白子的轮廓）。
-    private static func ringFraction(at c: (x: Double, y: Double), s: Double, ink: InkMask) -> Double {
+    /// shaded：斜方向上碰到的墨迹，四分之三以上往外到 0.7 个线距还是墨，那是一大片阴影，不是细细的轮廓。
+    private static func ringFraction(at c: (x: Double, y: Double), s: Double, ink: InkMask) -> (fraction: Double, shaded: Bool) {
         let directions = 36
-        var hits = 0
+        var hits = 0, diagonal = 0, thick = 0
         for k in 0..<directions {
             let angle = Double(k) / Double(directions) * 2 * Double.pi
+            func inked(_ r: Double) -> Bool { ink[Int((c.x + cos(angle) * r).rounded()), Int((c.y + sin(angle) * r).rounded())] }
             var r = s * 0.38
             while r <= s * 0.52 {
-                if ink[Int((c.x + cos(angle) * r).rounded()), Int((c.y + sin(angle) * r).rounded())] {
+                if inked(r) {
                     hits += 1
+                    // 斜着的方向上没有网格线，旁边的棋子也够不着 0.6 到 0.7 个线距；这里还是墨，就是一大片暗处。
+                    if k % 9 >= 2 && k % 9 <= 7 {
+                        diagonal += 1
+                        if inked(s * 0.6) && inked(s * 0.65) && inked(s * 0.7) { thick += 1 }
+                    }
                     break
                 }
                 r += 1
             }
         }
-        return Double(hits) / Double(directions)
+        return (Double(hits) / Double(directions), diagonal > 0 && thick * 4 >= diagonal * 3)
     }
 }

@@ -124,6 +124,11 @@ struct DiagramChooser: View {
         NavigationStack {
             if let scanned = model.scannedPage {
                 VStack(spacing: 12) {
+                    if let note = scanned.note {
+                        Label(note, systemImage: "checkmark.circle.fill")
+                            .font(.headline)
+                            .foregroundStyle(.green)
+                    }
                     Text(summary(of: scanned.page))
                         .foregroundStyle(.secondary)
                     GeometryReader { proxy in

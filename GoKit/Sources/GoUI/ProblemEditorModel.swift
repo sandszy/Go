@@ -50,6 +50,8 @@ public struct ScannedPage {
     public let page: RecognizedPage
     /// 每道题（按 `RecognizedDiagram.id`）在作业本里的 id，选题时点进去的就是作业本里那一道。
     public let problemIDs: [Int: UUID]
+    /// 存进作业本的提示，比如“已存进作业本：第 13～18 题”。没有作业本时是 nil。
+    public var note: String? = nil
 }
 
 extension ScannedPage {
@@ -386,15 +388,18 @@ public final class ProblemEditorModel {
     public func importPhoto(_ image: CGImage) async {
         isRecognizing = true
         message = nil
-        let page = await Task.detached(priority: .userInitiated) {
-            try? PageRecognizer.recognize(image)
+        // 先按页面上的字把照片转正，题才能按书上的朝向贴到棋盘上；后面显示、裁原图都用转正后的图。
+        let result = await Task.detached(priority: .userInitiated) { () -> (CGImage, RecognizedPage)? in
+            let upright = PageOrientation.upright(image)
+            guard let page = try? PageRecognizer.recognize(upright) else { return nil }
+            return (upright, page)
         }.value
         isRecognizing = false
-        guard let page else {
+        guard let (upright, page) = result else {
             message = EditorMessage(text: "照片读不出来，换一张试试", tone: .warning)
             return
         }
-        show(page, from: image)
+        show(page, from: upright)
     }
 
     /// 显示识别结果。和识别分开，方便测试。
@@ -403,27 +408,74 @@ public final class ProblemEditorModel {
             message = EditorMessage(text: "没找到棋盘图。换个角度、拍正一点再试，或者直接手动摆题", tone: .warning)
             return
         }
-        let scanned = ScannedPage(
-            image: image,
-            page: page,
-            problemIDs: Dictionary(uniqueKeysWithValues: page.diagrams.map { ($0.id, UUID()) })
-        )
-        scannedPage = scanned
+        // 重拍的题：作业本里已经有同一页同一题号的，沿用它的 id 和第一次存的日期，存的时候就是换掉它，不多存一份。
+        var ids: [Int: UUID] = [:]
+        var earlier: [Int: SavedProblem] = [:]
+        for diagram in page.diagrams {
+            if let homework, let pageNumber = page.pageNumber, let number = diagram.number,
+               let old = homework.photoProblem(page: pageNumber, number: number, title: page.title(for: diagram)),
+               !ids.values.contains(old.id) {
+                ids[diagram.id] = old.id
+                earlier[diagram.id] = old
+            } else {
+                ids[diagram.id] = UUID()
+            }
+        }
+        var scanned = ScannedPage(image: image, page: page, problemIDs: ids)
         // 拍下来的每道题都存进作业本，以后能再选。
         if let homework {
             let now = Date.now
             for diagram in page.diagrams {
                 homework.save(
-                    SavedProblem(problem: scanned.problem(for: diagram), saved: now, hasPhoto: true, isIncomplete: diagram.isIncomplete),
+                    SavedProblem(
+                        problem: scanned.problem(for: diagram), saved: earlier[diagram.id]?.saved ?? now, hasPhoto: true,
+                        isIncomplete: diagram.isIncomplete, page: page.pageNumber, number: diagram.number
+                    ),
                     photo: PhotoLoader.crop(image, to: diagram.bounds)
                 )
             }
+            scanned.note = Self.importNote(
+                numbers: page.diagrams.compactMap(\.number),
+                unnumbered: page.diagrams.count { $0.number == nil },
+                replaced: page.diagrams.filter { earlier[$0.id] != nil }.compactMap(\.number)
+            )
         }
+        scannedPage = scanned
         if page.diagrams.count == 1 {
             loadDiagram(page.diagrams[0].id)
+            // 直接进了摆题，不经过选题页，存没存作业本写在提示开头。
+            if homework != nil, let current = message {
+                let prefix = earlier.isEmpty ? "已存进作业本。" : "作业本里原来就有这道题，换成了这次拍的。"
+                message = EditorMessage(text: prefix + current.text, tone: current.tone)
+            }
         } else {
             isChoosingDiagram = true
         }
+    }
+
+    /// 拍完一页的提示：存了哪几道题，哪几道是重拍换掉的。
+    static func importNote(numbers: [Int], unnumbered: Int, replaced: [Int]) -> String {
+        var text = numbers.isEmpty
+            ? "已存进作业本：\(unnumbered) 道题"
+            : "已存进作业本：第 \(numberList(numbers)) 题" + (unnumbered > 0 ? "，还有 \(unnumbered) 道没读出题号" : "")
+        if !replaced.isEmpty {
+            text += "。其中第 \(numberList(replaced)) 题原来就有，换成了这次拍的"
+        }
+        return text
+    }
+
+    /// 三道以上连着的题号写成“13～15”，其余用顿号隔开，比如“13～15、17”。
+    static func numberList(_ numbers: [Int]) -> String {
+        var runs: [[Int]] = []
+        for number in Set(numbers).sorted() {
+            if let last = runs.last?.last, number == last + 1 {
+                runs[runs.count - 1].append(number)
+            } else {
+                runs.append([number])
+            }
+        }
+        return runs.flatMap { run in run.count >= 3 ? ["\(run[0])～\(run[run.count - 1])"] : run.map(String.init) }
+            .joined(separator: "、")
     }
 
     /// 把选中的那道题放到棋盘上，进入摆题模式校对。

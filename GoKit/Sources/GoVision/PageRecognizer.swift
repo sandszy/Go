@@ -53,10 +53,10 @@ public enum PageRecognizer {
     private static func readPageNumberBlobs(of image: CGImage, below diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Int? {
         guard let spacing = median(diagrams.map { $0.spacing / scale }) else { return nil }
         let height = Double(image.height)
-        let top = max(diagrams.map(\.bounds.maxY).max() ?? 0, height * 0.8)
+        let top = height * 0.8
         let strip = CGRect(x: 0, y: top, width: Double(image.width), height: height - top)
         let blobs = GlyphReader.textBlobs(in: ink, area: strip, scale: scale, minHeight: spacing * 0.3, maxHeight: spacing * 1.2)
-        for blob in blobs where !isInsideBadge(blob, diagrams: diagrams, ink: ink, scale: scale) {
+        for blob in blobs where !isOnDiagram(blob, diagrams) && !isInsideBadge(blob, diagrams: diagrams, ink: ink, scale: scale) {
             let padded = blob.insetBy(dx: -blob.height * 0.6, dy: -blob.height * 0.6)
             guard let crop = PhotoLoader.crop(image, to: padded) else { continue }
             for fast in [false, true] {
@@ -132,7 +132,7 @@ public enum PageRecognizer {
         return items.lazy.compactMap { TextReader.number(in: $0.text) }.first
     }
 
-    /// 还有没读出题号的，按阅读顺序从读出来的题号往前往后推。几个读出来的题号对不上时就不推，免得推错。
+    /// 还有没读出题号的，按阅读顺序从读出来的题号往前往后推。读出来的题号互相对不上、又分不出哪个是读错的时候不推，免得推错。
     /// 题号按版面上的格子排：练习册一页是几行几列整齐排的，题号从左到右、从上到下数。
     /// 没认出来的图也占着一个格子，所以按格子算，而不是按认出来的图数。
     private static func fillNumberSequence(_ diagrams: inout [RecognizedDiagram]) {
@@ -146,10 +146,14 @@ public enum PageRecognizer {
                 diagrams[index].number = before + slots[index] - slots[index - 1]
             }
         }
-        // 再看整页：读出来的题号都是"格子号 + 同一个数"，没读出来的就按这个补。
-        let offsets = Set(diagrams.indices.compactMap { index in diagrams[index].number.map { $0 - slots[index] } })
-        guard offsets.count == 1, let offset = offsets.first, offset >= 1 else { return }
-        for index in diagrams.indices where diagrams[index].number == nil {
+        // 再看整页：读出来的题号大多是"格子号 + 同一个数"，没读出来的按这个补。读出来的题号都对得上，或者有三道以上、
+        // 超过一半对得上时，对不上的那道是读错了（比如排在最后的 18 只读出 "8"，前后夹不住），也按这个改。
+        let offsets = diagrams.indices.compactMap { index in diagrams[index].number.map { $0 - slots[index] } }
+        let counts = Dictionary(offsets.map { ($0, 1) }, uniquingKeysWith: +)
+        guard let (offset, agreeing) = counts.max(by: { $0.value < $1.value }), offset >= 1 else { return }
+        let fixWrong = counts.count > 1 && agreeing >= 3 && agreeing * 2 > offsets.count
+        guard counts.count == 1 || fixWrong else { return }
+        for index in diagrams.indices where diagrams[index].number.map({ $0 - slots[index] }) != offset {
             diagrams[index].number = offset + slots[index]
         }
     }
@@ -186,25 +190,34 @@ public enum PageRecognizer {
         return index
     }
 
-    /// 同一页的图一般一样大。行数或列数比大多数图少两条以上，就是没拍全。
-    private static func markIncomplete(_ diagrams: inout [RecognizedDiagram]) {
-        guard diagrams.count >= 3,
-              let columns = median(diagrams.map { Double($0.columns) }),
-              let rows = median(diagrams.map { Double($0.rows) })
-        else { return }
-        for index in diagrams.indices {
-            let diagram = diagrams[index]
-            diagrams[index].isIncomplete = Double(diagram.columns) <= columns - 2 || Double(diagram.rows) <= rows - 2
+    /// 同一页的图一般一样大。行数或列数比大多数图少，就是没拍全（被书缝、照片边挡住，或者反光看不清线）。
+    /// 没拍全的从棋盘边那一侧量，补成大多数图的大小，缺的部分是空点，家长照着书补上。
+    static func markIncomplete(_ diagrams: inout [RecognizedDiagram]) {
+        guard diagrams.count >= 3 else { return }
+        let columns = mostCommon(diagrams.map(\.columns)), rows = mostCommon(diagrams.map(\.rows))
+        for index in diagrams.indices where diagrams[index].columns < columns || diagrams[index].rows < rows {
+            diagrams[index].isIncomplete = true
+            diagrams[index].pad(toColumns: columns, rows: rows)
         }
     }
 
-    /// 圈在圆圈里的是题号（照片下面露出半截的下一道题），不是页码。
+    /// 出现最多的那个数，一样多时取大的。
+    private static func mostCommon(_ values: [Int]) -> Int {
+        let counts = Dictionary(values.map { ($0, 1) }, uniquingKeysWith: +)
+        return counts.max { a, b in a.value == b.value ? a.key < b.key : a.value < b.value }?.key ?? 0
+    }
+
+    /// 页码在照片下面四分之一。圈在圆圈里的是题号（照片下面露出半截的下一道题），棋盘图里的是白子上的数字，都不是页码。
     private static func pageNumber(in text: [TextItem], imageHeight: Double, diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Int? {
-        let lowest = diagrams.map(\.bounds.maxY).max() ?? 0
         return text
-            .filter { $0.box.minY > max(lowest, imageHeight * 0.75) && !isInsideBadge($0.box, diagrams: diagrams, ink: ink, scale: scale) }
+            .filter { $0.box.minY > imageHeight * 0.75 && !isOnDiagram($0.box, diagrams) && !isInsideBadge($0.box, diagrams: diagrams, ink: ink, scale: scale) }
             .compactMap { TextReader.number(in: $0.text) }
             .first
+    }
+
+    /// 棋盘图上的字（白子上的数字）不是页码。
+    private static func isOnDiagram(_ box: CGRect, _ diagrams: [RecognizedDiagram]) -> Bool {
+        diagrams.contains { $0.bounds.contains(CGPoint(x: box.midX, y: box.midY)) }
     }
 
     private static func isInsideBadge(_ box: CGRect, diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Bool {
@@ -240,10 +253,11 @@ public enum PageRecognizer {
         return GlyphReader.number(in: image, center: badge.center, radius: badge.radius * 0.7)
     }
 
-    /// 页码字小，整页读时常常漏掉。把最后一个棋盘图下面那一条单独裁出来再读。
+    /// 页码字小，整页读时常常漏掉。把照片最下面那一条单独裁出来再读。
+    /// 不只看最低那个图的下面：只认出一半的图外框会往下伸，页码就在它旁边；图里面的字另外跳过。
     static func readPageNumberStrip(of image: CGImage, below diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Int? {
         let height = Double(image.height)
-        let top = max(diagrams.map(\.bounds.maxY).max() ?? 0, height * 0.8)
+        let top = height * 0.8
         let width = Double(image.width)
         let strip = CGRect(x: 0, y: top, width: width, height: height - top).integral
         guard strip.height > 10 else { return nil }
@@ -256,7 +270,10 @@ public enum PageRecognizer {
             for fast in [false, true] {
                 let items = (try? TextReader.read(crop, minimumTextHeight: 0, languages: ["en-US"], fast: fast)) ?? []
                 let numbers = items.lazy
-                    .filter { !isInsideBadge($0.box.offsetBy(dx: piece.minX, dy: piece.minY), diagrams: diagrams, ink: ink, scale: scale) }
+                    .filter { item in
+                        let box = item.box.offsetBy(dx: piece.minX, dy: piece.minY)
+                        return !isOnDiagram(box, diagrams) && !isInsideBadge(box, diagrams: diagrams, ink: ink, scale: scale)
+                    }
                     .compactMap { TextReader.number(in: $0.text) }
                 if let number = numbers.first { return number }
             }

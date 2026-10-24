@@ -50,7 +50,7 @@ enum EngineSelfTest {
             log("第 \(round) 次：\(visits) 次用 \(String(format: "%.2f", seconds)) 秒，每秒 \(Int(Double(visits) / seconds)) 次")
         }
         if arguments.contains("-engineSpeedOnly") { return }
-        guard let image = PhotoLoader.image(at: photo), let page = try? PageRecognizer.recognize(image) else {
+        guard let image = PhotoLoader.image(at: photo), let page = try? PageRecognizer.recognize(PageOrientation.upright(image)) else {
             return log("照片识别失败：\(photo.path)")
         }
         log("\(photo.lastPathComponent)：\(page.diagrams.count) 道题 \(page.toPlay?.name ?? "?")先 \(page.goal?.name ?? "题型不明")")

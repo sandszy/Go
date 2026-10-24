@@ -32,8 +32,8 @@ struct HomeworkTests {
         return diagram
     }
 
-    private func page(_ diagrams: [RecognizedDiagram]) -> RecognizedPage {
-        RecognizedPage(imageSize: CGSize(width: 200, height: 200), diagrams: diagrams, toPlay: .black, goal: .capturingRace, pageNumber: 35)
+    private func page(_ diagrams: [RecognizedDiagram], number: Int? = 35) -> RecognizedPage {
+        RecognizedPage(imageSize: CGSize(width: 200, height: 200), diagrams: diagrams, toPlay: .black, goal: .capturingRace, pageNumber: number)
     }
 
     private func files(_ ext: String) -> [URL] {
@@ -124,10 +124,65 @@ struct HomeworkTests {
         #expect(homework.problems.map(\.hasPhoto) == [true, true])
         #expect(homework.problems.map(\.isIncomplete) == [false, true])
         #expect(files("jpg").count == 2)
+        #expect(model.scannedPage?.note == "已存进作业本：第 7、8 题")
 
         model.loadDiagram(1)
         #expect(model.saveState == .saved)
         #expect(model.problem.id == homework.problems[1].id)
+    }
+
+    @Test("同一页重拍：同题号的换成新拍的，id 和第一次存的日期不变，不多存一份；以前存的旧文件按题目名认")
+    func retakeReplaces() throws {
+        // 旧版本存的第 7 题：文件里没有 page、number 两项。
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let day = Date(timeIntervalSince1970: 1_000_000)
+        let old = SavedProblem(problem: Problem(title: "第 35 页第 7 题"), saved: day, hasPhoto: true)
+        let json = try #require(String(data: JSONEncoder().encode(old), encoding: .utf8))
+        #expect(!json.contains("\"page\"") && !json.contains("\"number\""), "和旧文件一样，没有页码和题号")
+        try Data(json.utf8).write(to: directory.appending(path: "\(old.id.uuidString).json"))
+
+        let model = ProblemEditorModel(homework: HomeworkStore(directory: directory))
+        let homework = try #require(model.homework)
+        #expect(homework.problems.map(\.id) == [old.id])
+        model.show(page([diagram(id: 0, number: 8)]), from: photo)
+        #expect(homework.problems.count == 2)
+
+        model.show(page([diagram(id: 0, number: 7, incomplete: true), diagram(id: 1, number: 8), diagram(id: 2, number: 9)]), from: photo)
+        #expect(homework.problems.count == 3)
+        let seven = try #require(homework[old.id])
+        #expect(seven.saved == day)
+        #expect(seven.isIncomplete)
+        #expect(seven.problem.setup[Point(1, 17)] == .black, "棋子换成了新拍的")
+        #expect(seven.page == 35 && seven.number == 7)
+        #expect(model.scannedPage?.note == "已存进作业本：第 7～9 题。其中第 7、8 题原来就有，换成了这次拍的")
+        #expect(HomeworkStore(directory: directory).problems.count == 3)
+    }
+
+    @Test("没读出页码时认不出是不是同一页，照常新存一份")
+    func retakeNeedsPageNumber() {
+        let model = ProblemEditorModel(homework: HomeworkStore(directory: directory))
+        model.show(page([diagram(id: 0, number: 7), diagram(id: 1, number: 8)], number: nil), from: photo)
+        model.show(page([diagram(id: 0, number: 7), diagram(id: 1, number: 8)], number: nil), from: photo)
+        #expect(model.homework?.problems.count == 4)
+        #expect(model.scannedPage?.note == "已存进作业本：第 7、8 题")
+    }
+
+    @Test("存进作业本的提示：三道以上连着的题号写成一段，没读出题号的另外数")
+    func importNoteRanges() {
+        #expect(ProblemEditorModel.importNote(numbers: [13, 14, 15, 17], unnumbered: 0, replaced: []) == "已存进作业本：第 13～15、17 题")
+        #expect(ProblemEditorModel.importNote(numbers: [18, 13, 14, 15, 16, 17], unnumbered: 1, replaced: [13, 14])
+            == "已存进作业本：第 13～18 题，还有 1 道没读出题号。其中第 13、14 题原来就有，换成了这次拍的")
+        #expect(ProblemEditorModel.importNote(numbers: [], unnumbered: 6, replaced: []) == "已存进作业本：6 道题")
+    }
+
+    @Test("只有一道题时直接进摆题，提示开头说存进了作业本；重拍时说原来就有")
+    func singleDiagramNote() {
+        let model = ProblemEditorModel(homework: HomeworkStore(directory: directory))
+        model.show(page([diagram(id: 0, number: 7)]), from: photo)
+        #expect(model.message?.text == "已存进作业本。对照原图检查一下棋子，摆错的地方点一下就能改")
+        model.show(page([diagram(id: 0, number: 7)]), from: photo)
+        #expect(model.message?.text == "作业本里原来就有这道题，换成了这次拍的。对照原图检查一下棋子，摆错的地方点一下就能改")
+        #expect(model.homework?.problems.count == 1)
     }
 
     @Test("校对改过的题，开始做题时存回作业本")

@@ -45,7 +45,7 @@ enum GridDetector {
         let shortHorizontal = ink.thinHorizontalRuns(minLength: max(8, width / 120), gap: gap)
         let shortVertical = ink.thinVerticalRuns(minLength: max(8, width / 120), gap: gap)
 
-        return lineClusters(longLines, ink: ink).compactMap { box in
+        return lineClusters(longLines, ink: ink, horizontal: shortHorizontal, vertical: shortVertical).compactMap { box in
             fitGrid(in: box, ink: ink, horizontal: shortHorizontal, vertical: shortVertical)
         }
     }
@@ -58,7 +58,8 @@ enum GridDetector {
     /// 把长直线按位置聚成一团一团，每团的外框可能是一个棋盘图。碰到照片边上的（隔壁页露出来的半个图）不要。
     /// 棋子摆得密时，被棋子挡住的那几行几列露不出长直线，外框只框住了一部分；给了 ink 时，
     /// 再顺着连在一起的墨迹（棋子都压在线上，整个棋盘图是连成一片的）把外框撑到整个图。
-    static func lineClusters(_ lines: InkMask, ink: InkMask? = nil) -> [Box] {
+    /// 再给了 horizontal、vertical 时，先按长直线拟合一次网格量出线距，每边最多撑 5 个线距。
+    static func lineClusters(_ lines: InkMask, ink: InkMask? = nil, horizontal: InkMask? = nil, vertical: InkMask? = nil) -> [Box] {
         let cell = max(4, lines.width / 250)
         // 隔大约半个线距也算连着：横线之间隔一个线距，棋子又会把竖线挡断。
         let reach = max(2, lines.width / 60 / cell)
@@ -100,7 +101,13 @@ enum GridDetector {
         if let ink {
             // 只撑大起码有半个图大的团，零碎的线段（文字、页边）不管。
             boxes = mergeOverlapping(boxes).map { box in
-                box.maxX - box.minX >= minSize / 2 && box.maxY - box.minY >= minSize / 2 ? grow(box, along: ink) : box
+                guard box.maxX - box.minX >= minSize / 2 && box.maxY - box.minY >= minSize / 2 else { return box }
+                // 被棋子挡住的最多三四行；撑得比 5 个线距还远，就是顺着书缝的阴影连到别处去了。
+                var reach: Int?
+                if let horizontal, let vertical, let grid = fitGrid(in: box, ink: ink, horizontal: horizontal, vertical: vertical) {
+                    reach = Int(grid.spacing * 5)
+                }
+                return grow(box, along: ink, reach: reach)
             }
         }
         return mergeOverlapping(boxes).filter { box in
@@ -109,10 +116,11 @@ enum GridDetector {
         }
     }
 
-    /// 从框里的墨迹出发，把连着的墨迹都找出来，返回它们的外框。每边最多往外撑原来那么大，
-    /// 免得顺着阴影、页边一路连出去；撑到了上限的那边说明连出去了，那边保持原样。
-    static func grow(_ box: Box, along ink: InkMask) -> Box {
-        let limitX = box.maxX - box.minX, limitY = box.maxY - box.minY
+    /// 从框里的墨迹出发，把连着的墨迹都找出来，返回它们的外框。每边最多往外撑原来那么大（给了 reach 时再不超过 reach），
+    /// 免得顺着阴影、页边一路连出去；撑到了上限或照片边上的那边说明连出去了，那边保持原样。
+    /// 照片边上露出半截的隔壁题，长直线本身就碰到了照片边，在 lineClusters 里已经不要了，用不着靠撑大来认。
+    static func grow(_ box: Box, along ink: InkMask, reach: Int? = nil) -> Box {
+        let limitX = min(reach ?? .max, box.maxX - box.minX), limitY = min(reach ?? .max, box.maxY - box.minY)
         let limit: Box = (max(0, box.minX - limitX), max(0, box.minY - limitY),
                           min(ink.width - 1, box.maxX + limitX), min(ink.height - 1, box.maxY + limitY))
         let width = limit.maxX - limit.minX + 1
@@ -140,10 +148,10 @@ enum GridDetector {
             }
         }
         return (
-            found.minX <= limit.minX && limit.minX > 0 ? box.minX : found.minX,
-            found.minY <= limit.minY && limit.minY > 0 ? box.minY : found.minY,
-            found.maxX >= limit.maxX && limit.maxX < ink.width - 1 ? box.maxX : found.maxX,
-            found.maxY >= limit.maxY && limit.maxY < ink.height - 1 ? box.maxY : found.maxY
+            found.minX <= limit.minX ? box.minX : found.minX,
+            found.minY <= limit.minY ? box.minY : found.minY,
+            found.maxX >= limit.maxX ? box.maxX : found.maxX,
+            found.maxY >= limit.maxY ? box.maxY : found.maxY
         )
     }
 
@@ -192,13 +200,20 @@ enum GridDetector {
         let columnProjection = straightenedProjection(columnPixels, center: centerY, range: xRange)
         let rowPeaks = peaks(rowProjection.counts).map { $0 + yRange.lowerBound }
         let columnPeaks = peaks(columnProjection.counts).map { $0 + xRange.lowerBound }
-        guard rowPeaks.count >= 4, columnPeaks.count >= 4 else { return nil }
+        guard max(rowPeaks.count, columnPeaks.count) >= 4, min(rowPeaks.count, columnPeaks.count) >= 2 else { return nil }
 
         let spacing = estimateSpacing(rowPeaks, columnPeaks)
         guard spacing > 6 else { return nil }
-        let rows = extend(regularize(rowPeaks, spacing: spacing), to: yRange, spacing: spacing)
-        let columns = extend(regularize(columnPeaks, spacing: spacing), to: xRange, spacing: spacing)
-        guard rows.count >= 5, columns.count >= 5 else { return nil }
+        // 书页斜着拍时，横竖两个方向的线距不一样，各算各的；一个方向的线太少、或者算出来差得太多时，用两个方向合起来的。
+        // 一个方向只找到两三条线也要（反光挡住了半个图），能认出来的子先摆上，标成没拍全。
+        func own(_ peaks: [Double]) -> Double {
+            let own = peaks.count >= 4 ? estimateSpacing(peaks, []) : 0
+            return abs(own - spacing) <= spacing * 0.2 ? own : spacing
+        }
+        let rowSpacing = own(rowPeaks), columnSpacing = own(columnPeaks)
+        let rows = extend(regularize(rowPeaks, spacing: rowSpacing), to: yRange, spacing: rowSpacing)
+        let columns = extend(regularize(columnPeaks, spacing: columnSpacing), to: xRange, spacing: columnSpacing)
+        guard max(rows.count, columns.count) >= 5, min(rows.count, columns.count) >= 4 else { return nil }
 
         // 峰值是拉直后的位置，换回原图上的斜线：v = 位置 + 斜率 × (t - 中心)。
         var horizontalLines = rows.map { position in
@@ -259,19 +274,17 @@ enum GridDetector {
         return close.isEmpty ? rough : close.reduce(0, +) / Double(close.count)
     }
 
-    /// 按线距把峰值排成等距的一列：缺的补上，多出来的不要。
+    /// 按线距把峰值排成一列：相邻两个峰之间差不多是几个线距，就等分补上几条线；对不上线距的峰不要。
+    /// 等分而不是一个线距一个线距往下推：书页弯曲、斜着拍时线距会慢慢变，推几步就和真的线错开了。
     static func regularize(_ peaks: [Double], spacing: Double) -> [Double] {
-        guard let first = peaks.first, let last = peaks.last else { return [] }
-        var result = [first]
-        var expected = first + spacing
-        while expected <= last + spacing * 0.3 {
-            if let match = peaks.min(by: { abs($0 - expected) < abs($1 - expected) }), abs(match - expected) <= spacing * 0.3 {
-                result.append(match)
-                expected = match + spacing
-            } else {
-                result.append(expected)
-                expected += spacing
-            }
+        guard var last = peaks.first else { return [] }
+        var result = [last]
+        for peak in peaks.dropFirst() {
+            let gap = peak - last
+            let steps = (gap / spacing).rounded()
+            guard steps >= 1, abs(gap - steps * spacing) <= spacing * (0.3 + 0.05 * (steps - 1)) else { continue }
+            for k in 1...Int(steps) { result.append(last + gap * Double(k) / steps) }
+            last = peak
         }
         return result
     }

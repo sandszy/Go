@@ -13,14 +13,20 @@ public struct SavedProblem: Codable, Identifiable, Hashable, Sendable {
     public var hasPhoto: Bool
     /// 识别时发现这道题没拍全。
     public var isIncomplete: Bool
+    /// 作业纸上的页码和题号，拍照时读出来的才有。重拍同一页时用来认出是同一道题。
+    /// 以前存的文件里没有这两项，读出来是 nil。
+    public var page: Int?
+    public var number: Int?
 
     public var id: UUID { problem.id }
 
-    public init(problem: Problem, saved: Date = .now, hasPhoto: Bool = false, isIncomplete: Bool = false) {
+    public init(problem: Problem, saved: Date = .now, hasPhoto: Bool = false, isIncomplete: Bool = false, page: Int? = nil, number: Int? = nil) {
         self.problem = problem
         self.saved = saved
         self.hasPhoto = hasPhoto
         self.isIncomplete = isIncomplete
+        self.page = page
+        self.number = number
     }
 }
 
@@ -57,6 +63,16 @@ public final class HomeworkStore {
 
     public subscript(id: UUID) -> SavedProblem? {
         problems.first { $0.id == id }
+    }
+
+    /// 作业本里同一页、同一题号的拍照题，重拍时拿新拍的换掉它。
+    /// 以前存的文件没记页码和题号，就按自动起的题目名（“第 35 页第 7 题”）找。
+    public func photoProblem(page: Int, number: Int, title: String) -> SavedProblem? {
+        problems.first { saved in
+            guard saved.hasPhoto else { return false }
+            if let savedPage = saved.page, let savedNumber = saved.number { return savedPage == page && savedNumber == number }
+            return saved.problem.title == title
+        }
     }
 
     /// 存一道题，同一个 id 的覆盖。带 photo 时把原图也存下来。

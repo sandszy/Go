@@ -90,6 +90,33 @@ public struct RecognizedDiagram: Identifiable, Sendable {
         self.spacing = spacing
     }
 
+    /// 没拍全的图补成 columns 列、rows 行：左边是棋盘边就往右补，右边是棋盘边就往左补，上下同理。
+    /// 两边都不是棋盘边时，不知道缺的是哪边，不补。补出来的是空点，不标没认准。
+    mutating func pad(toColumns targetColumns: Int, rows targetRows: Int) {
+        func split(_ missing: Int, start: DiagramEdges, end: DiagramEdges) -> (before: Int, after: Int) {
+            guard missing > 0 else { return (0, 0) }
+            if edges.contains(start) && !edges.contains(end) { return (0, missing) }
+            if edges.contains(end) && !edges.contains(start) { return (missing, 0) }
+            return (0, 0)
+        }
+        let (left, right) = split(targetColumns - columns, start: .left, end: .right)
+        let (top, bottom) = split(targetRows - rows, start: .top, end: .bottom)
+        guard left + right + top + bottom > 0 else { return }
+        let width = columns + left + right
+        let empty = [Stone?](repeating: nil, count: width)
+        stones = Array(repeating: empty, count: top)
+            + stones.map { Array(repeating: nil, count: left) + $0 + Array(repeating: nil, count: right) }
+            + Array(repeating: empty, count: bottom)
+        columns = width
+        rows += top + bottom
+        // 补在左边、上边时，原来那些点的下标跟着挪。
+        func moved(_ p: GridPoint) -> GridPoint { GridPoint(column: p.column + left, row: p.row + top) }
+        labels = Dictionary(uniqueKeysWithValues: labels.map { (moved($0.key), $0.value) })
+        uncertain = Set(uncertain.map(moved))
+        markedStones = Dictionary(uniqueKeysWithValues: markedStones.map { (moved($0.key), $0.value) })
+        oneShapedStones = Set(oneShapedStones.map(moved))
+    }
+
     /// 放到棋盘上：哪边是棋盘边就贴到哪边，都不是就放在中间。四边都是边、大小正好时就用那么大的棋盘。
     public var placement: (size: Int, x: Int, y: Int) {
         let size = edges == [.left, .right, .top, .bottom] && columns == rows && Board.supportedSizes.contains(columns) ? columns : 19
