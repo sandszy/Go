@@ -12,6 +12,22 @@ public struct ProblemEditorView: View {
     public var body: some View {
         GeometryReader { proxy in
             let wide = proxy.size.width > proxy.size.height
+
+            // 做题时只显示局部棋谱（比如 9×7 路），比整盘窄很多；横屏下如果棋盘还占满整列宽度，
+            // 为了保持格子是正方形，上下就会留出很宽的空白。这里按可用高度反推棋盘实际需要的宽度，
+            // 省下来的宽度让给右边面板，棋盘就能顶天立地，不再因为局部棋谱的形状而上下留白。
+            let availableWidth = proxy.size.width - 48
+            let availableHeight = proxy.size.height - 48
+            let boardAspect = BoardGeometry.aspectRatio(region: model.region, showCoordinates: model.showCoordinates)
+            let minPanelWidth: CGFloat = 320
+            let maxPanelWidth: CGFloat = 460
+            let boardWidth: CGFloat? = wide
+                ? max(200, min(availableHeight * boardAspect, availableWidth - minPanelWidth - 24))
+                : nil
+            let panelWidth: CGFloat? = wide
+                ? max(minPanelWidth, min(maxPanelWidth, availableWidth - (boardWidth ?? 0) - 24))
+                : nil
+
             let layout = wide ? AnyLayout(HStackLayout(spacing: 24)) : AnyLayout(VStackLayout(spacing: 16))
             layout {
                 BoardView(
@@ -25,12 +41,13 @@ public struct ProblemEditorView: View {
                     showCoordinates: model.showCoordinates,
                     onTap: model.tap
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(width: boardWidth)
+                .frame(maxWidth: wide ? nil : .infinity, maxHeight: .infinity)
 
                 ScrollView {
                     panel
                 }
-                .frame(width: wide ? 320 : nil)
+                .frame(width: panelWidth)
                 .frame(maxHeight: wide ? .infinity : proxy.size.height * 0.4)
             }
             .padding(24)
@@ -58,11 +75,7 @@ public struct ProblemEditorView: View {
 
     private var panel: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Picker("模式", selection: Binding(get: { model.mode }, set: { model.switchMode(to: $0) })) {
-                ForEach(EditorMode.allCases) { Text($0.name).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            ModeSwitcherBar(mode: model.mode) { model.switchMode(to: $0) }
 
             // 放在面板最上面：竖屏时面板要滚动，放在下面孩子看不到。
             if model.isThinking {

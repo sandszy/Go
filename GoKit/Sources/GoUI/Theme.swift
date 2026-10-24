@@ -35,6 +35,15 @@ enum Theme {
     static let whiteStoneRim = Color(red: 0.47, green: 0.42, blue: 0.33)
     static let blackStoneRim = Color(white: 0.42)
 
+    /// 模式切换条的木纹：线性对角渐变（不用径向），矮胖的长条里才不会出现突兀光斑；
+    /// 比棋盘本身亮一些，像一块单独钉上去的木牌，不会被误认成棋盘的一部分。
+    static let modeBarGradient = Gradient(stops: [
+        .init(color: Color(red: 0.93, green: 0.81, blue: 0.60), location: 0.0),
+        .init(color: Color(red: 0.84, green: 0.68, blue: 0.46), location: 0.5),
+        .init(color: Color(red: 0.72, green: 0.55, blue: 0.34), location: 1.0),
+    ])
+    static let modeBarRim = line.opacity(0.3)
+
     static var background: Color {
         #if canImport(UIKit)
         Color(uiColor: .secondarySystemBackground)
