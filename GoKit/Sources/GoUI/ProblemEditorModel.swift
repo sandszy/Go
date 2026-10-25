@@ -520,11 +520,9 @@ public final class ProblemEditorModel {
         homework?.contains(problem.id) ?? false
     }
 
-    /// 作业本里排在这道后面的那道，做题时点“下一题”就做它。是最后一道、或者这道不在作业本里时没有。
+    /// 做题时点“下一题”就做它：按存进来的先后排在这道后面的那道。是最后存的、或者这道不在作业本里时没有。
     public var nextHomeworkProblem: SavedProblem? {
-        guard let problems = homework?.problems, let index = problems.firstIndex(where: { $0.id == problem.id }),
-              index + 1 < problems.count else { return nil }
-        return problems[index + 1]
+        homework?.problem(after: problem.id)
     }
 
     /// 作业本里标着没拍全。做题时一直提示，补不补由做题的人决定。

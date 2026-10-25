@@ -45,7 +45,7 @@ public struct SavedProblem: Codable, Identifiable, Hashable, Sendable {
 @MainActor
 @Observable
 public final class HomeworkStore {
-    /// 新的一天在前；同一天里先存的在前，一页里按题号排。做题时“下一题”也按这个顺序。
+    /// 作业本列表的顺序：后存的在前，一页里最后一题在上。正好是“下一题”的顺序倒过来，见 `problem(after:)`。
     public private(set) var problems: [SavedProblem] = []
     private let directory: URL
     @ObservationIgnored private var photos: [UUID: CGImage] = [:]
@@ -74,6 +74,16 @@ public final class HomeworkStore {
 
     public subscript(id: UUID) -> SavedProblem? {
         problems.first { $0.id == id }
+    }
+
+    /// 做题时“下一题”做的那道：从最早存的往最晚存的做，一页里按题号往下。
+    /// 和列表正好反着：列表把新拍的放上面好找，做题还是按做作业的先后。是最后存的那道、或者不在作业本里时没有。
+    public func problem(after id: UUID) -> SavedProblem? {
+        let order = problems.sorted { a, b in
+            a.saved != b.saved ? a.saved < b.saved : Self.byTitle(a, b)
+        }
+        guard let index = order.firstIndex(where: { $0.id == id }), index + 1 < order.count else { return nil }
+        return order[index + 1]
     }
 
     /// 作业本里同一页、同一题号的拍照题，重拍时拿新拍的换掉它。
@@ -142,16 +152,17 @@ public final class HomeworkStore {
         directory.appending(path: "\(id.uuidString).\(ext)")
     }
 
-    /// 一天里按做作业的顺序：先拍的那页在前，一页里第一题在前。一页拍照存的题共用一个时间，同一时间按题目名排，
-    /// 题号按数字大小。以前的版本一页的题一道道存、各取各的时间，按从早到晚排也就是题号顺序。
+    /// 后存的在前，按天分组也就是新的一天在前。一页拍照存的题共用一个时间，同一时间按题目名倒着排，一页里第一题在最下面。
+    /// 以前的版本一页的题按题号一道道存、各取各的时间，排出来也是这样。
     private func sort() {
-        let calendar = Calendar.current
         problems.sort { a, b in
-            let dayA = calendar.startOfDay(for: a.saved), dayB = calendar.startOfDay(for: b.saved)
-            if dayA != dayB { return dayA > dayB }
-            if a.saved != b.saved { return a.saved < b.saved }
-            return a.problem.title.localizedStandardCompare(b.problem.title) == .orderedAscending
+            a.saved != b.saved ? a.saved > b.saved : Self.byTitle(b, a)
         }
+    }
+
+    /// 同一时间存的按题目名排，题号按数字大小（第 9 题在第 10 题前面）。
+    private static func byTitle(_ a: SavedProblem, _ b: SavedProblem) -> Bool {
+        a.problem.title.localizedStandardCompare(b.problem.title) == .orderedAscending
     }
 
     private static func jpeg(_ image: CGImage) -> Data? {
