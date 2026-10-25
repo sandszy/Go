@@ -62,7 +62,7 @@ public enum PageRecognizer {
         let top = height * 0.8
         let strip = CGRect(x: 0, y: top, width: Double(image.width), height: height - top)
         let blobs = GlyphReader.textBlobs(in: ink, area: strip, scale: scale, minHeight: spacing * 0.3, maxHeight: spacing * 1.2)
-        for blob in blobs where !isOnDiagram(blob, diagrams) && !isInsideBadge(blob, diagrams: diagrams, ink: ink, scale: scale) {
+        for blob in blobs where !isOtherNumber(blob, diagrams: diagrams, ink: ink, scale: scale) {
             let padded = blob.insetBy(dx: -blob.height * 0.6, dy: -blob.height * 0.6)
             guard let crop = PhotoLoader.crop(image, to: padded) else { continue }
             for fast in [false, true] {
@@ -179,12 +179,7 @@ public enum PageRecognizer {
         let numbers = text.compactMap { item in TextReader.number(in: item.text).map { (value: $0, box: item.box) } }
         for index in diagrams.indices {
             let bounds = diagrams[index].bounds
-            let candidates = numbers.filter { item in
-                item.box.midX < bounds.minX + bounds.width * 0.1
-                    && item.box.midX > bounds.minX - bounds.width * 0.5
-                    && item.box.midY > bounds.minY - bounds.height * 0.2
-                    && item.box.midY < bounds.minY + bounds.height * 0.4
-            }
+            let candidates = numbers.filter { isInNumberArea(CGPoint(x: $0.box.midX, y: $0.box.midY), of: bounds) }
             let best = candidates.min { a, b in
                 hypot(a.box.midX - bounds.minX, a.box.midY - bounds.minY) < hypot(b.box.midX - bounds.minX, b.box.midY - bounds.minY)
             }
@@ -290,17 +285,28 @@ public enum PageRecognizer {
         return counts.max { a, b in a.value == b.value ? a.key < b.key : a.value < b.value }?.key ?? 0
     }
 
-    /// 页码在照片下面四分之一。圈在圆圈里的是题号（照片下面露出半截的下一道题），棋盘图里的是白子上的数字，都不是页码。
+    /// 页码在照片下面四分之一。
     private static func pageNumber(in text: [TextItem], imageHeight: Double, diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Int? {
         return text
-            .filter { $0.box.minY > imageHeight * 0.75 && !isOnDiagram($0.box, diagrams) && !isInsideBadge($0.box, diagrams: diagrams, ink: ink, scale: scale) }
+            .filter { $0.box.minY > imageHeight * 0.75 && !isOtherNumber($0.box, diagrams: diagrams, ink: ink, scale: scale) }
             .compactMap { TextReader.number(in: $0.text) }
             .first
     }
 
-    /// 棋盘图上的字（白子上的数字）不是页码。
-    private static func isOnDiagram(_ box: CGRect, _ diagrams: [RecognizedDiagram]) -> Bool {
-        diagrams.contains { $0.bounds.contains(CGPoint(x: box.midX, y: box.midY)) }
+    /// 题号印在图的左上方。找题号在这一块找，读页码时这一块的数字跳过。
+    private static func isInNumberArea(_ point: CGPoint, of bounds: CGRect) -> Bool {
+        point.x < bounds.minX + bounds.width * 0.1
+            && point.x > bounds.minX - bounds.width * 0.5
+            && point.y > bounds.minY - bounds.height * 0.2
+            && point.y < bounds.minY + bounds.height * 0.4
+    }
+
+    /// 不是页码的数字：棋盘图里的（白子上的数字）、图左上方的题号、圈在圆圈里的题号（照片下面露出半截的下一道题）。
+    /// 题号先按位置认：灰底的圆圈在墨迹图上不一定找得到，最下面一行的题号一落进下面四分之一，就会被当成页码。
+    private static func isOtherNumber(_ box: CGRect, diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Bool {
+        let center = CGPoint(x: box.midX, y: box.midY)
+        return diagrams.contains { $0.bounds.contains(center) || isInNumberArea(center, of: $0.bounds) }
+            || isInsideBadge(box, diagrams: diagrams, ink: ink, scale: scale)
     }
 
     private static func isInsideBadge(_ box: CGRect, diagrams: [RecognizedDiagram], ink: InkMask, scale: Double) -> Bool {
@@ -355,7 +361,7 @@ public enum PageRecognizer {
                 let numbers = items.lazy
                     .filter { item in
                         let box = item.box.offsetBy(dx: piece.minX, dy: piece.minY)
-                        return !isOnDiagram(box, diagrams) && !isInsideBadge(box, diagrams: diagrams, ink: ink, scale: scale)
+                        return !isOtherNumber(box, diagrams: diagrams, ink: ink, scale: scale)
                     }
                     .compactMap { TextReader.number(in: $0.text) }
                 if let number = numbers.first { return number }

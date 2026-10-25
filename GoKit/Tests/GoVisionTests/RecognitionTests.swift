@@ -7,6 +7,7 @@ import Testing
 
 /// 画一张像练习册那样的棋盘图：白底黑线，棋盘边用粗线，没到边的一侧线条伸出去一点。
 /// rows 是字符画，X 黑、O 白、. 空，第一行是图的最上面。给了 caption 时在图上面写一行字，像练习册的题目说明。
+/// notes 是页面上别的字（题号、页码），at 是字的左下角，原点在左上角。
 private func drawDiagram(
     _ rows: [String],
     edges: DiagramEdges,
@@ -15,6 +16,7 @@ private func drawDiagram(
     rotation: CGFloat = 0,
     canvas: CGSize = CGSize(width: 1600, height: 1200),
     caption: String? = nil,
+    notes: [(text: String, at: CGPoint)] = [],
     verticalGray: CGFloat = 0.1,
     verticalWidth: CGFloat = 1.6,
     extras: (CGContext) -> Void = { _ in }
@@ -25,14 +27,15 @@ private func drawDiagram(
     )!
     context.setFillColor(CGColor(gray: 0.97, alpha: 1))
     context.fill(CGRect(origin: .zero, size: canvas))
-    if let caption {
-        // 在翻转坐标以前写字，不然字是倒的。CGContext 原点在左下角，离上边 150 像素。
-        let font = CTFontCreateWithName("PingFangSC-Regular" as CFString, 48, nil)
-        let text = NSAttributedString(string: caption, attributes: [
+    // 在翻转坐标以前写字，不然字是倒的。CGContext 原点在左下角。
+    let font = CTFontCreateWithName("PingFangSC-Regular" as CFString, 48, nil)
+    let texts = (caption.map { [(text: $0, at: CGPoint(x: 200, y: 150))] } ?? []) + notes
+    for note in texts {
+        let text = NSAttributedString(string: note.text, attributes: [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
             NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0.1, alpha: 1),
         ])
-        context.textPosition = CGPoint(x: 200, y: canvas.height - 150)
+        context.textPosition = CGPoint(x: note.at.x, y: canvas.height - note.at.y)
         CTLineDraw(CTLineCreateWithAttributedString(text), context)
     }
     // 换成左上角原点，和照片一样。
@@ -216,6 +219,27 @@ struct RecognitionTests {
         #expect(problem.setup[Point(16, 1)] == .black)
         #expect(problem.setup[Point(17, 1)] == .white)
         #expect(problem.setup[Point(17, 2)] == .white)
+    }
+
+    /// 第 43 页那张照片底下没拍到页码，最下面一行的题号“23”刚好落进下面四分之一，灰底的圆圈又没找到，在 iPad 上读成了页码。
+    @Test("最下面一行的题号落进照片下面四分之一，旁边没找到圆圈，也不当页码；底下真有页码照样读出来")
+    func problemNumberIsNotPageNumber() throws {
+        let rows = [
+            ".....X...",
+            "..XXXOO..",
+            ".XOOOXO..",
+            ".....XO..",
+            ".........",
+        ]
+        let number = (text: "23", at: CGPoint(x: 200, y: 960))
+        let page = try PageRecognizer.recognize(drawDiagram(rows, edges: [.left, .bottom], origin: CGPoint(x: 300, y: 920), notes: [number]))
+        #expect(page.diagrams.map(\.number) == [23])
+        #expect(page.pageNumber == nil)
+
+        let withPageNumber = try PageRecognizer.recognize(drawDiagram(
+            rows, edges: [.left, .bottom], origin: CGPoint(x: 300, y: 920), notes: [number, (text: "43", at: CGPoint(x: 780, y: 1150))]
+        ))
+        #expect(withPageNumber.pageNumber == 43)
     }
 
     @Test("从文字里读出黑先、题型和题号")
