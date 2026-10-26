@@ -63,6 +63,7 @@ public struct BoardView: View {
         GeometryReader { proxy in
             let geometry = BoardGeometry(region: region, showCoordinates: showCoordinates, size: proxy.size)
             let shape = RoundedRectangle(cornerRadius: geometry.spacing * 0.3, style: .continuous)
+            let frameWidth = geometry.spacing * 0.055
             Canvas { context, size in
                 draw(in: &context, size: size, geometry: geometry)
             }
@@ -72,13 +73,14 @@ public struct BoardView: View {
             })
             .overlay {
                 shape
-                    .strokeBorder(frameColor ?? .clear, lineWidth: geometry.spacing * 0.055)
+                    .strokeBorder(frameColor ?? .clear, lineWidth: frameWidth)
                     .animation(.easeOut(duration: 0.25), value: frameColor)
             }
             .overlay {
+                // 扫光只盖在画框这圈细线上，不盖住棋盘本身，不然会把棋子、网格线一起扫过，太抢戏。
                 if let flashColor {
                     ModeSwitchSweep(color: flashColor)
-                        .clipShape(shape)
+                        .mask(shape.stroke(lineWidth: frameWidth))
                         .allowsHitTesting(false)
                 }
             }
