@@ -360,6 +360,55 @@ struct HomeworkTests {
         #expect(unsaved.nextHomeworkProblem == nil)
     }
 
+    @Test("做题时点“上一题”回到前一道，从摆好的局面开始；没拍全的照样开始，提示补子")
+    func previousProblem() {
+        let model = solvingFirstOfPage()
+        model.startNextProblem()
+        model.startNextProblem()
+        let eighth = saved("第 35 页第 8 题", in: model.homework!)
+        #expect(model.previousHomeworkProblem?.id == eighth.id)
+        model.tap(Point(0, 0))
+        #expect(model.canUndo)
+
+        model.startPreviousProblem()
+        #expect(model.mode == .solve)
+        #expect(model.problem.id == eighth.id)
+        #expect(model.position == eighth.problem.startPosition, "从摆好的局面开始，第 9 题下的子不带过来")
+        #expect(!model.canUndo)
+        #expect(model.message == EditorMessage(text: "第 35 页第 8 题没拍全，缺的部分先回“摆题”照着书补上", tone: .warning))
+
+        model.startPreviousProblem()
+        #expect(model.problem.id == saved("第 35 页第 7 题", in: model.homework!).id)
+        #expect(model.message == EditorMessage(text: "开始做第 35 页第 7 题", tone: .info))
+    }
+
+    @Test("最早存的那道没有上一题；手摆的题存进作业本以后也有上一题、下一题，没有题目名的提示“开始做上一题”")
+    func previousProblemAtStart() {
+        let homework = HomeworkStore(directory: directory)
+        // 手摆一道没起题目名的题。不传题目时默认是例题，有题目名。
+        let manual = ProblemEditorModel(problem: Problem(), homework: homework)
+        manual.tap(Point(3, 3))
+        manual.saveProblem()
+        manual.switchMode(to: .solve)
+        #expect(manual.isHomeworkProblem)
+        #expect(manual.previousHomeworkProblem == nil)
+
+        // 后拍的一页只有一道题，直接进摆题。
+        let model = ProblemEditorModel(homework: homework)
+        model.show(page([diagram(id: 0, number: 7)]), from: photo)
+        model.switchMode(to: .solve)
+        let seventh = model.problem.id
+        #expect(model.previousHomeworkProblem?.id == manual.problem.id)
+
+        model.startPreviousProblem()
+        #expect(model.problem.id == manual.problem.id)
+        #expect(model.message == EditorMessage(text: "开始做上一题", tone: .info))
+        #expect(model.previousHomeworkProblem == nil)
+        model.startPreviousProblem()
+        #expect(model.problem.id == manual.problem.id, "最早的那道，点了也不换")
+        #expect(model.nextHomeworkProblem?.id == seventh)
+    }
+
     @Test("做没拍全的题，下了子以后“没拍全”还在")
     func incompleteNoteWhileSolving() {
         let model = solvingFirstOfPage()

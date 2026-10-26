@@ -248,6 +248,7 @@ public struct ProblemEditorView: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
 
+            // 做题不放“重做”：再下一次同一点就走进原来的变化，分数也不重新算。对弈面板还有重做。
             HStack(spacing: 12) {
                 Button {
                     model.undo()
@@ -258,26 +259,26 @@ public struct ProblemEditorView: View {
                 .disabled(!model.canUndo)
 
                 Button {
-                    model.redo()
-                } label: {
-                    Label("重做", systemImage: "arrow.uturn.forward")
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(!model.canRedo)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-
-            HStack(spacing: 12) {
-                Button {
                     model.restart()
                 } label: {
                     Label("重新开始", systemImage: "arrow.counterclockwise")
                         .frame(maxWidth: .infinity)
                 }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
 
-                // 作业本里的题才有下一道；最后一道时变灰。
-                if model.isHomeworkProblem {
+            // 作业本里的题才有上一道、下一道；最早、最晚那道时对应的按钮变灰。
+            if model.isHomeworkProblem {
+                HStack(spacing: 12) {
+                    Button {
+                        model.startPreviousProblem()
+                    } label: {
+                        Label("上一题", systemImage: "arrow.left")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(model.previousHomeworkProblem == nil)
+
                     Button {
                         model.startNextProblem()
                     } label: {
@@ -286,9 +287,9 @@ public struct ProblemEditorView: View {
                     }
                     .disabled(model.nextHomeworkProblem == nil)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
 
             if !model.variationChoices.isEmpty {
                 variationControls

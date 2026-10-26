@@ -515,7 +515,7 @@ public final class ProblemEditorModel {
         message = EditorMessage(text: "从作业本里拿出了\(saved.problem.title.isEmpty ? "这道题" : saved.problem.title)，点“做题”开始", tone: .info)
     }
 
-    /// 棋盘上这道题在作业本里。做题时只有这样才有“下一题”。
+    /// 棋盘上这道题在作业本里。做题时只有这样才有“上一题”“下一题”。手摆的题存进作业本以后也算。
     public var isHomeworkProblem: Bool {
         homework?.contains(problem.id) ?? false
     }
@@ -523,6 +523,11 @@ public final class ProblemEditorModel {
     /// 做题时点“下一题”就做它：按存进来的先后排在这道后面的那道。是最后存的、或者这道不在作业本里时没有。
     public var nextHomeworkProblem: SavedProblem? {
         homework?.problem(after: problem.id)
+    }
+
+    /// 做题时点“上一题”就做它：按存进来的先后排在这道前面的那道。是最早存的、或者这道不在作业本里时没有。
+    public var previousHomeworkProblem: SavedProblem? {
+        homework?.problem(before: problem.id)
     }
 
     /// 作业本里标着没拍全。做题时一直提示，补不补由做题的人决定。
@@ -539,17 +544,27 @@ public final class ProblemEditorModel {
         homework.save(saved)
     }
 
-    /// 做题时直接开始做作业本里的下一道，不回摆题，也不用打开作业本。没拍全的照样开始，提示里说一声。
+    /// 做题时直接开始做作业本里的下一道，不回摆题，也不用打开作业本。
     public func startNextProblem() {
-        guard mode == .solve, let next = nextHomeworkProblem else { return }
-        problem = next.problem
-        referenceImage = homework?.photo(for: next.id)
+        startHomeworkProblem(nextHomeworkProblem, untitled: "开始做下一题")
+    }
+
+    /// 做题时直接回到作业本里的上一道。
+    public func startPreviousProblem() {
+        startHomeworkProblem(previousHomeworkProblem, untitled: "开始做上一题")
+    }
+
+    /// 换上那道题直接开始做。没拍全的照样开始，提示里说一声。
+    private func startHomeworkProblem(_ saved: SavedProblem?, untitled: String) {
+        guard mode == .solve, let saved else { return }
+        problem = saved.problem
+        referenceImage = homework?.photo(for: saved.id)
         uncertainPoints = []
         restart()
-        let title = next.problem.title
-        message = next.isIncomplete
+        let title = saved.problem.title
+        message = saved.isIncomplete
             ? EditorMessage(text: "\(title.isEmpty ? "这道题" : title)没拍全，缺的部分先回“摆题”照着书补上", tone: .warning)
-            : EditorMessage(text: title.isEmpty ? "开始做下一题" : "开始做\(title)", tone: .info)
+            : EditorMessage(text: title.isEmpty ? untitled : "开始做\(title)", tone: .info)
     }
 
     /// AI 陪下时，AI 替对方下的那手跟着一起退回，回到孩子自己的回合。
