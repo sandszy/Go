@@ -27,7 +27,11 @@ public struct BoardView: View {
     /// 数子时每个点归谁，画成小方块：空点上，以及死子上（画对方的颜色）。
     public var territory: [Point: Stone]
     public var showCoordinates: Bool
+    /// 棋盘四周的画框颜色，比如区分摆题和做题/对弈（F1.7）。nil 就不画框，预览、截图小图不用这个。
+    public var frameColor: Color?
     public var onTap: ((Point) -> Void)?
+
+    @State private var flashColor: Color?
 
     public init(
         board: Board,
@@ -39,6 +43,7 @@ public struct BoardView: View {
         uncertain: Set<Point> = [],
         territory: [Point: Stone] = [:],
         showCoordinates: Bool = false,
+        frameColor: Color? = nil,
         onTap: ((Point) -> Void)? = nil
     ) {
         self.board = board
@@ -50,12 +55,14 @@ public struct BoardView: View {
         self.uncertain = uncertain
         self.territory = territory
         self.showCoordinates = showCoordinates
+        self.frameColor = frameColor
         self.onTap = onTap
     }
 
     public var body: some View {
         GeometryReader { proxy in
             let geometry = BoardGeometry(region: region, showCoordinates: showCoordinates, size: proxy.size)
+            let shape = RoundedRectangle(cornerRadius: geometry.spacing * 0.3, style: .continuous)
             Canvas { context, size in
                 draw(in: &context, size: size, geometry: geometry)
             }
@@ -63,10 +70,30 @@ public struct BoardView: View {
             .gesture(SpatialTapGesture().onEnded { value in
                 if let p = geometry.point(at: value.location) { onTap?(p) }
             })
+            .overlay {
+                shape
+                    .strokeBorder(frameColor ?? .clear, lineWidth: geometry.spacing * 0.22)
+                    .animation(.easeOut(duration: 0.25), value: frameColor)
+            }
+            .overlay {
+                if let flashColor {
+                    ModeSwitchSweep(color: flashColor)
+                        .clipShape(shape)
+                        .allowsHitTesting(false)
+                }
+            }
         }
         .aspectRatio(BoardGeometry.aspectRatio(region: region, showCoordinates: showCoordinates), contentMode: .fit)
         .accessibilityElement()
         .accessibilityLabel("棋盘，黑子 \(board.count(of: .black)) 个，白子 \(board.count(of: .white)) 个")
+        // 切模式瞬间画框颜色一变，就在棋盘上扫一道光，比只变颜色更"凌厉"、更容易注意到。
+        .onChange(of: frameColor) { _, new in
+            guard let new else { return }
+            flashColor = new
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if flashColor == new { flashColor = nil }
+            }
+        }
     }
 
     // MARK: - 绘制
@@ -242,6 +269,30 @@ public struct BoardView: View {
             let c = g.position(of: p)
             let ring = Path(ellipseIn: CGRect(x: c.x - r * 1.05, y: c.y - r * 1.05, width: r * 2.1, height: r * 2.1))
             context.stroke(ring, with: .color(.orange), style: StrokeStyle(lineWidth: r * 0.14, dash: [r * 0.3, r * 0.2]))
+        }
+    }
+}
+
+/// 切模式瞬间在棋盘上扫过的一道斜向光带，0.25 秒扫完就淡出，配合画框颜色变化（F1.7）。
+private struct ModeSwitchSweep: View {
+    let color: Color
+    @State private var t: CGFloat = -0.5
+
+    var body: some View {
+        LinearGradient(
+            stops: [
+                .init(color: color.opacity(0), location: 0),
+                .init(color: color.opacity(0.55), location: 0.5),
+                .init(color: color.opacity(0), location: 1),
+            ],
+            startPoint: UnitPoint(x: t - 0.45, y: -0.2),
+            endPoint: UnitPoint(x: t + 0.45, y: 1.2)
+        )
+        .blendMode(.plusLighter)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.25)) {
+                t = 1.5
+            }
         }
     }
 }

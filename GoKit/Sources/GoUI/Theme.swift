@@ -44,6 +44,11 @@ enum Theme {
     ])
     static let modeBarRim = line.opacity(0.3)
 
+    /// 棋盘画框：摆题琥珀色、做题和对弈深青色，瞄一眼棋盘（不用看顶上的切换条）就知道现在是哪种模式，
+    /// 免得忘记点"做题"还在摆题模式下落子。见需求说明 F1.7。
+    static let setupFrame = Color(red: 0.82, green: 0.49, blue: 0.14)
+    static let playFrame = Color(red: 0.10, green: 0.42, blue: 0.44)
+
     static var background: Color {
         #if canImport(UIKit)
         Color(uiColor: .secondarySystemBackground)
