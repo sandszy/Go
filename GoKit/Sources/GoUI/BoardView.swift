@@ -72,7 +72,7 @@ public struct BoardView: View {
             })
             .overlay {
                 shape
-                    .strokeBorder(frameColor ?? .clear, lineWidth: geometry.spacing * 0.22)
+                    .strokeBorder(frameColor ?? .clear, lineWidth: geometry.spacing * 0.055)
                     .animation(.easeOut(duration: 0.25), value: frameColor)
             }
             .overlay {
