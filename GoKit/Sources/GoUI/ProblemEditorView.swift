@@ -44,6 +44,7 @@ public struct ProblemEditorView: View {
                     uncertain: model.mode == .setup ? model.uncertainPoints : [],
                     territory: model.territory,
                     showCoordinates: model.showCoordinates,
+                    frameColor: model.mode == .setup ? Theme.setupFrame : Theme.playFrame,
                     onTap: model.tap
                 )
                 .frame(width: boardWidth)
