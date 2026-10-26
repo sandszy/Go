@@ -110,6 +110,30 @@ final class LayoutUITests: XCTestCase {
         attachScreenshot(named: "竖屏-对弈数子")
     }
 
+    /// 界面原则（技术架构第 8 节）：横屏时摆题面板上的原图一眼就能看到，不用往下滚动。
+    /// 用最占地方的情况查：带原图、标着没拍全（“原图”那一行多了提示和“已经全了”），上面还有拿出题目的提示。
+    @MainActor
+    func testReferenceImageVisibleInLandscape() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchArguments = ["-katagoHardware", "off", "-samplePhotoProblem"]
+        app.launch()
+
+        let photo = app.images["原图"]
+        let complete = app.buttons["已经全了"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 5))
+        XCTAssertTrue(complete.exists)
+        attachScreenshot(named: "横屏-原图")
+        let screen = app.windows.firstMatch.frame
+        XCTAssertLessThanOrEqual(photo.frame.maxY, screen.maxY, "原图要整个在屏幕里，不用往下滚")
+        XCTAssertTrue(photo.isHittable)
+        XCTAssertTrue(complete.isHittable)
+
+        complete.tap()
+        XCTAssertFalse(complete.waitForExistence(timeout: 1), "点了以后“没拍全”和按钮都不见了")
+        XCTAssertTrue(photo.exists)
+    }
+
     @MainActor
     private func boardElement(in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any)

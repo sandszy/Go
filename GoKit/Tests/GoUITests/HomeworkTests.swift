@@ -41,6 +41,11 @@ struct HomeworkTests {
             .filter { $0.pathExtension == ext }
     }
 
+    /// 按题目名找作业本里的题。列表里一页是倒着排的，按位置拿容易拿错。
+    private func saved(_ title: String, in store: HomeworkStore) -> SavedProblem {
+        store.problems.first { $0.problem.title == title }!
+    }
+
     @Test("存、重新打开读回来、覆盖、删除")
     func storeRoundTrip() {
         let store = HomeworkStore(directory: directory)
@@ -147,15 +152,19 @@ struct HomeworkTests {
         #expect(HomeworkStore(directory: directory).problems.count == 1)
     }
 
-    @Test("新存的在前，同一页的按题号排")
+    @Test("列表里新的一天在前；同一天里后存的在前，一次拍照存的按题号倒着排，第一题在最下面")
     func ordering() {
         let store = HomeworkStore(directory: directory)
-        let day = Date(timeIntervalSince1970: 1_000_000)
+        let day = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 9))!
         for number in [10, 9, 2] {
             store.save(SavedProblem(problem: Problem(title: "第 35 页第 \(number) 题"), saved: day))
         }
         store.save(SavedProblem(problem: Problem(title: "后来摆的"), saved: day.addingTimeInterval(60)))
-        #expect(store.problems.map(\.problem.title) == ["后来摆的", "第 35 页第 2 题", "第 35 页第 9 题", "第 35 页第 10 题"])
+        store.save(SavedProblem(problem: Problem(title: "早上摆的"), saved: day.addingTimeInterval(-3600)))
+        store.save(SavedProblem(problem: Problem(title: "第二天拍的"), saved: day.addingTimeInterval(86_400)))
+        #expect(store.problems.map(\.problem.title) == [
+            "第二天拍的", "后来摆的", "第 35 页第 10 题", "第 35 页第 9 题", "第 35 页第 2 题", "早上摆的",
+        ])
     }
 
     @Test("拍的一页里每道题都存进作业本，点进去的就是存的那道")
@@ -163,15 +172,15 @@ struct HomeworkTests {
         let model = ProblemEditorModel(homework: HomeworkStore(directory: directory))
         model.show(page([diagram(id: 0, number: 7), diagram(id: 1, number: 8, incomplete: true)]), from: photo)
         let homework = model.homework!
-        #expect(homework.problems.map(\.problem.title) == ["第 35 页第 7 题", "第 35 页第 8 题"])
+        #expect(homework.problems.map(\.problem.title) == ["第 35 页第 8 题", "第 35 页第 7 题"])
         #expect(homework.problems.map(\.hasPhoto) == [true, true])
-        #expect(homework.problems.map(\.isIncomplete) == [false, true])
+        #expect(homework.problems.map(\.isIncomplete) == [true, false])
         #expect(files("jpg").count == 2)
         #expect(model.scannedPage?.note == "已存进作业本：第 7、8 题")
 
         model.loadDiagram(1)
         #expect(model.saveState == .saved)
-        #expect(model.problem.id == homework.problems[1].id)
+        #expect(model.problem.id == saved("第 35 页第 8 题", in: homework).id)
     }
 
     @Test("同一页重拍：同题号的换成新拍的，id 和第一次存的日期不变，不多存一份；以前存的旧文件按题目名认")
@@ -278,5 +287,162 @@ struct HomeworkTests {
         #expect(model.uncertainPoints.isEmpty)
         #expect(!model.isShowingHomework)
         #expect(model.saveState == .saved)
+    }
+
+    /// 拍一页存进第 7、8（没拍全）、9 题，打开第 7 题开始做。
+    private func solvingFirstOfPage() -> ProblemEditorModel {
+        let model = ProblemEditorModel(homework: HomeworkStore(directory: directory))
+        model.show(page([diagram(id: 0, number: 7), diagram(id: 1, number: 8, incomplete: true), diagram(id: 2, number: 9)]), from: photo)
+        model.load(saved("第 35 页第 7 题", in: model.homework!))
+        model.switchMode(to: .solve)
+        model.confirmMoves = false
+        return model
+    }
+
+    @Test("做题时点“下一题”直接做作业本里的下一道；没拍全的照样开始，提示补子")
+    func nextProblem() {
+        let model = solvingFirstOfPage()
+        let eighth = saved("第 35 页第 8 题", in: model.homework!)
+        #expect(model.isHomeworkProblem)
+        #expect(model.nextHomeworkProblem?.id == eighth.id)
+        model.tap(Point(0, 0))
+        #expect(model.canUndo)
+
+        model.startNextProblem()
+        #expect(model.mode == .solve)
+        #expect(model.problem.id == eighth.id)
+        #expect(model.position == eighth.problem.startPosition, "从摆好的局面开始，上一道下的子不带过来")
+        #expect(!model.canUndo)
+        #expect(model.message == EditorMessage(text: "第 35 页第 8 题没拍全，缺的部分先回“摆题”照着书补上", tone: .warning))
+
+        model.startNextProblem()
+        #expect(model.problem.id == saved("第 35 页第 9 题", in: model.homework!).id)
+        #expect(model.message == EditorMessage(text: "开始做第 35 页第 9 题", tone: .info))
+    }
+
+    @Test("“下一题”从早往晚做：前一页做完接着做后拍的那页；列表正好倒过来")
+    func nextProblemAcrossPages() {
+        let store = HomeworkStore(directory: directory)
+        let day = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 9))!
+        for number in [7, 8] {
+            store.save(SavedProblem(problem: Problem(title: "第 35 页第 \(number) 题"), saved: day))
+        }
+        for number in [13, 14] {
+            store.save(SavedProblem(problem: Problem(title: "第 36 页第 \(number) 题"), saved: day.addingTimeInterval(60)))
+        }
+        #expect(store.problems.map(\.problem.title) == ["第 36 页第 14 题", "第 36 页第 13 题", "第 35 页第 8 题", "第 35 页第 7 题"])
+
+        let model = ProblemEditorModel(homework: store)
+        model.load(saved("第 35 页第 8 题", in: store))
+        model.switchMode(to: .solve)
+        #expect(model.nextHomeworkProblem?.problem.title == "第 36 页第 13 题")
+        model.startNextProblem()
+        #expect(model.problem.title == "第 36 页第 13 题")
+        model.startNextProblem()
+        #expect(model.problem.title == "第 36 页第 14 题")
+        #expect(model.nextHomeworkProblem == nil, "最后存的那道没有下一题")
+    }
+
+    @Test("最后一道没有下一题；手摆的、还没存进作业本的题没有“下一题”")
+    func nextProblemAtEnd() {
+        let model = solvingFirstOfPage()
+        let last = saved("第 35 页第 9 题", in: model.homework!)
+        model.startNextProblem()
+        model.startNextProblem()
+        #expect(model.problem.id == last.id)
+        #expect(model.nextHomeworkProblem == nil)
+        model.startNextProblem()
+        #expect(model.problem.id == last.id, "最后一道，点了也不换")
+
+        let unsaved = ProblemEditorModel(homework: model.homework)
+        unsaved.switchMode(to: .solve)
+        #expect(!unsaved.isHomeworkProblem)
+        #expect(unsaved.nextHomeworkProblem == nil)
+    }
+
+    @Test("做题时点“上一题”回到前一道，从摆好的局面开始；没拍全的照样开始，提示补子")
+    func previousProblem() {
+        let model = solvingFirstOfPage()
+        model.startNextProblem()
+        model.startNextProblem()
+        let eighth = saved("第 35 页第 8 题", in: model.homework!)
+        #expect(model.previousHomeworkProblem?.id == eighth.id)
+        model.tap(Point(0, 0))
+        #expect(model.canUndo)
+
+        model.startPreviousProblem()
+        #expect(model.mode == .solve)
+        #expect(model.problem.id == eighth.id)
+        #expect(model.position == eighth.problem.startPosition, "从摆好的局面开始，第 9 题下的子不带过来")
+        #expect(!model.canUndo)
+        #expect(model.message == EditorMessage(text: "第 35 页第 8 题没拍全，缺的部分先回“摆题”照着书补上", tone: .warning))
+
+        model.startPreviousProblem()
+        #expect(model.problem.id == saved("第 35 页第 7 题", in: model.homework!).id)
+        #expect(model.message == EditorMessage(text: "开始做第 35 页第 7 题", tone: .info))
+    }
+
+    @Test("最早存的那道没有上一题；手摆的题存进作业本以后也有上一题、下一题，没有题目名的提示“开始做上一题”")
+    func previousProblemAtStart() {
+        let homework = HomeworkStore(directory: directory)
+        // 手摆一道没起题目名的题。不传题目时默认是例题，有题目名。
+        let manual = ProblemEditorModel(problem: Problem(), homework: homework)
+        manual.tap(Point(3, 3))
+        manual.saveProblem()
+        manual.switchMode(to: .solve)
+        #expect(manual.isHomeworkProblem)
+        #expect(manual.previousHomeworkProblem == nil)
+
+        // 后拍的一页只有一道题，直接进摆题。
+        let model = ProblemEditorModel(homework: homework)
+        model.show(page([diagram(id: 0, number: 7)]), from: photo)
+        model.switchMode(to: .solve)
+        let seventh = model.problem.id
+        #expect(model.previousHomeworkProblem?.id == manual.problem.id)
+
+        model.startPreviousProblem()
+        #expect(model.problem.id == manual.problem.id)
+        #expect(model.message == EditorMessage(text: "开始做上一题", tone: .info))
+        #expect(model.previousHomeworkProblem == nil)
+        model.startPreviousProblem()
+        #expect(model.problem.id == manual.problem.id, "最早的那道，点了也不换")
+        #expect(model.nextHomeworkProblem?.id == seventh)
+    }
+
+    @Test("做没拍全的题，下了子以后“没拍全”还在")
+    func incompleteNoteWhileSolving() {
+        let model = solvingFirstOfPage()
+        #expect(!model.isIncompleteProblem)
+        model.startNextProblem()
+        #expect(model.isIncompleteProblem)
+        model.tap(Point(0, 0))
+        #expect(model.canUndo)
+        #expect(model.isIncompleteProblem)
+    }
+
+    @Test("点“已经全了”去掉没拍全，改过的棋子一起存回作业本；只改棋子不去掉")
+    func markComplete() {
+        let model = ProblemEditorModel(homework: HomeworkStore(directory: directory))
+        model.show(page([diagram(id: 0, number: 7), diagram(id: 1, number: 8, incomplete: true)]), from: photo)
+        let eighth = saved("第 35 页第 8 题", in: model.homework!)
+        model.load(eighth)
+        #expect(model.isIncompleteProblem)
+
+        let empty = Point(0, 18)
+        model.select(.black)
+        model.tap(empty)
+        #expect(model.saveState == .modified)
+        model.switchMode(to: .solve)
+        model.switchMode(to: .setup)
+        #expect(model.isIncompleteProblem, "改了子、存回去了，还是标着没拍全")
+
+        model.tap(Point(1, 18))
+        model.markComplete()
+        #expect(!model.isIncompleteProblem)
+        #expect(model.saveState == .saved)
+        let reopened = HomeworkStore(directory: directory)[eighth.id]
+        #expect(reopened?.isIncomplete == false)
+        #expect(reopened?.problem.setup[Point(1, 18)] == .black, "按钮按下前改的子也存了")
+        #expect(reopened?.page == 35 && reopened?.number == 8)
     }
 }
