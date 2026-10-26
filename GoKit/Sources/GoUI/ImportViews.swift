@@ -6,7 +6,8 @@ import SwiftUI
 import VisionKit
 #endif
 
-/// 摆题面板最上面的导入按钮：拍作业、从相册选，还能回到上一页照片选别的题。
+/// 摆题面板最上面的导入按钮：拍作业、从相册选，下面一排是作业本和保存。
+/// 没有回到选题页的按钮：拍的题都存进了作业本，换题从作业本选。
 struct ImportControls: View {
     @Bindable var model: ProblemEditorModel
     @State private var photoItem: PhotosPickerItem?
@@ -40,46 +41,33 @@ struct ImportControls: View {
                     ProgressView()
                     Text("正在认棋盘……").foregroundStyle(.secondary)
                 }
-            } else {
-                // "选别的题"和"作业本"都是次要操作，合并成一排，不再各占一行，省竖直空间给下面的原图和棋盘。
-                let showPickOther = (model.scannedPage?.page.diagrams.count ?? 0) > 1
-                if showPickOther || model.homework != nil {
-                    HStack(spacing: 8) {
-                        if showPickOther {
-                            Button {
-                                model.isChoosingDiagram = true
-                            } label: {
-                                Label("选别的题", systemImage: "square.grid.2x2")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        if model.homework != nil {
-                            Button {
-                                model.isShowingHomework = true
-                            } label: {
-                                Label("作业本", systemImage: "books.vertical")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            switch model.saveState {
-                            case .unsaved, .modified:
-                                Button {
-                                    model.saveProblem()
-                                } label: {
-                                    Label(model.saveState == .unsaved ? "保存" : "存修改", systemImage: "square.and.arrow.down")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .disabled(model.problem.setup.isEmpty)
-                            case .saved:
-                                Label("已存", systemImage: "checkmark")
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
+            } else if model.homework != nil {
+                // 次要操作合并成一排，不各占一行，省竖直空间给下面的原图和棋盘。
+                HStack(spacing: 8) {
+                    Button {
+                        model.isShowingHomework = true
+                    } label: {
+                        Label("作业本", systemImage: "books.vertical")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    switch model.saveState {
+                    case .unsaved, .modified:
+                        Button {
+                            model.saveProblem()
+                        } label: {
+                            Label(model.saveState == .unsaved ? "保存" : "存修改", systemImage: "square.and.arrow.down")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(model.problem.setup.isEmpty)
+                    case .saved:
+                        Label("已存", systemImage: "checkmark")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
+                .buttonStyle(.bordered)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
             }
         }
         .onChange(of: photoItem) { _, item in
