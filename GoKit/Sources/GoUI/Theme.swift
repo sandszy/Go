@@ -44,10 +44,16 @@ enum Theme {
     ])
     static let modeBarRim = line.opacity(0.3)
 
-    /// 棋盘画框：摆题琥珀色、做题和对弈深青色，瞄一眼棋盘（不用看顶上的切换条）就知道现在是哪种模式，
-    /// 免得忘记点"做题"还在摆题模式下落子。见需求说明 F1.7。
-    static let setupFrame = Color(red: 0.82, green: 0.49, blue: 0.14)
-    static let playFrame = Color(red: 0.10, green: 0.42, blue: 0.44)
+    /// 棋盘画框：瞄一眼棋盘（不用看顶上的切换条）就知道现在是哪种模式，免得忘记点"做题"还在摆题模式下落子。见需求说明 F1.7。
+    /// 摆题：远峰蓝（iPhone 13 Pro 那个蓝），静止。
+    static let setupFrame = Color(red: 0.58, green: 0.72, blue: 0.84)
+    /// 做题、对弈：跑马灯沿途经过的几种颜色，和 Apple Intelligence 开启时的效果类似，见 BoardView.MarqueeFrame。
+    static let marqueeColors: [Color] = [
+        Color(red: 0.25, green: 0.47, blue: 0.95),
+        Color(red: 0.55, green: 0.35, blue: 0.92),
+        Color(red: 0.93, green: 0.35, blue: 0.62),
+        Color(red: 0.98, green: 0.55, blue: 0.22),
+    ]
 
     static var background: Color {
         #if canImport(UIKit)
