@@ -12,6 +12,16 @@ public struct GhostStone: Equatable, Sendable {
     }
 }
 
+/// 棋盘四周的画框样式，区分摆题和做题/对弈（F1.7）。
+public enum BoardFrameStyle: Equatable {
+    /// 不画框，预览、截图小图用这个。
+    case none
+    /// 固定颜色，比如摆题的远峰蓝。
+    case color(Color)
+    /// 跑马灯式的多彩流动，和 Apple Intelligence 开启时的效果类似，用在做题、对弈。
+    case marquee
+}
+
 /// 棋盘。只负责画和把点击换算成交叉点，不管规则。
 /// 只显示局部时，棋盘边线画粗线，没到边的一侧线条伸出去一点，和印刷题的样子一致。
 public struct BoardView: View {
@@ -27,8 +37,8 @@ public struct BoardView: View {
     /// 数子时每个点归谁，画成小方块：空点上，以及死子上（画对方的颜色）。
     public var territory: [Point: Stone]
     public var showCoordinates: Bool
-    /// 棋盘四周的画框颜色，比如区分摆题和做题/对弈（F1.7）。nil 就不画框，预览、截图小图不用这个。
-    public var frameColor: Color?
+    /// 棋盘四周的画框样式（F1.7）。默认不画框，预览、截图小图不用这个。
+    public var frame: BoardFrameStyle
     public var onTap: ((Point) -> Void)?
 
     @State private var flashColor: Color?
@@ -43,7 +53,7 @@ public struct BoardView: View {
         uncertain: Set<Point> = [],
         territory: [Point: Stone] = [:],
         showCoordinates: Bool = false,
-        frameColor: Color? = nil,
+        frame: BoardFrameStyle = .none,
         onTap: ((Point) -> Void)? = nil
     ) {
         self.board = board
@@ -55,7 +65,7 @@ public struct BoardView: View {
         self.uncertain = uncertain
         self.territory = territory
         self.showCoordinates = showCoordinates
-        self.frameColor = frameColor
+        self.frame = frame
         self.onTap = onTap
     }
 
@@ -72,9 +82,20 @@ public struct BoardView: View {
                 if let p = geometry.point(at: value.location) { onTap?(p) }
             })
             .overlay {
-                shape
-                    .strokeBorder(frameColor ?? .clear, lineWidth: frameWidth)
-                    .animation(.easeOut(duration: 0.25), value: frameColor)
+                switch frame {
+                case .none:
+                    EmptyView()
+                case .color(let c):
+                    shape
+                        .strokeBorder(c, lineWidth: frameWidth)
+                case .marquee:
+                    // 做题、对弈：边框一直在转，比固定颜色更难被忽略，不用再等切换瞬间的扫光提醒。
+                    // allowsHitTesting(false)：这层是普通 View 不是 Shape，mask 只管画出来的样子，
+                    // 不挡住底下棋盘的点击，不然棋盘会变得点不动。
+                    MarqueeFrame()
+                        .mask(shape.stroke(lineWidth: frameWidth))
+                        .allowsHitTesting(false)
+                }
             }
             .overlay {
                 // 扫光只盖在画框这圈细线上，不盖住棋盘本身，不然会把棋子、网格线一起扫过，太抢戏。
@@ -88,12 +109,15 @@ public struct BoardView: View {
         .aspectRatio(BoardGeometry.aspectRatio(region: region, showCoordinates: showCoordinates), contentMode: .fit)
         .accessibilityElement()
         .accessibilityLabel("棋盘，黑子 \(board.count(of: .black)) 个，白子 \(board.count(of: .white)) 个")
-        // 切模式瞬间画框颜色一变，就在棋盘上扫一道光，比只变颜色更"凌厉"、更容易注意到。
-        .onChange(of: frameColor) { _, new in
-            guard let new else { return }
-            flashColor = new
+        // 切回摆题（固定颜色）瞬间在画框上扫一道光，提示跑马灯已经停了；切到做题/对弈不需要，跑马灯转起来本身就是提示。
+        .onChange(of: frame) { _, new in
+            guard case .color(let c) = new else {
+                flashColor = nil
+                return
+            }
+            flashColor = c
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                if flashColor == new { flashColor = nil }
+                if flashColor == c { flashColor = nil }
             }
         }
     }
@@ -295,6 +319,25 @@ private struct ModeSwitchSweep: View {
             withAnimation(.easeOut(duration: 0.25)) {
                 t = 1.5
             }
+        }
+    }
+}
+
+/// 做题、对弈画框：跑马灯式的多彩流动，和系统里 Apple Intelligence 开启时的效果类似（F1.7）。
+/// 用 TimelineView 按时间推进角度，而不是 withAnimation + repeatForever，这样切到别的 App 再回来
+/// 也能接着转，不会停在某一帧上。
+private struct MarqueeFrame: View {
+    private static let period: Double = 3.2
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let elapsed = timeline.date.timeIntervalSinceReferenceDate
+            let progress = (elapsed.truncatingRemainder(dividingBy: Self.period)) / Self.period
+            AngularGradient(
+                colors: Theme.marqueeColors + Theme.marqueeColors.reversed() + [Theme.marqueeColors[0]],
+                center: .center
+            )
+            .rotationEffect(.degrees(progress * 360))
         }
     }
 }
