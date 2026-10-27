@@ -326,18 +326,22 @@ private struct ModeSwitchSweep: View {
 /// 做题、对弈画框：跑马灯式的多彩流动，和系统里 Apple Intelligence 开启时的效果类似（F1.7）。
 /// 用 TimelineView 按时间推进角度，而不是 withAnimation + repeatForever，这样切到别的 App 再回来
 /// 也能接着转，不会停在某一帧上。
+/// 转的是渐变的起止角度，不是把整个视图转起来：棋盘不是正方形，转视图时四个角会转出画框，
+/// 画框就一段有一段没有，看着像一截边框在跑；转角度时画框整圈一直都在，只有颜色沿着边框流动。
 private struct MarqueeFrame: View {
     private static let period: Double = 3.2
 
     var body: some View {
         TimelineView(.animation) { timeline in
             let elapsed = timeline.date.timeIntervalSinceReferenceDate
-            let progress = (elapsed.truncatingRemainder(dividingBy: Self.period)) / Self.period
+            let start = (elapsed.truncatingRemainder(dividingBy: Self.period)) / Self.period * 360
             AngularGradient(
-                colors: Theme.marqueeColors + Theme.marqueeColors.reversed() + [Theme.marqueeColors[0]],
-                center: .center
+                // 首尾接上同一种颜色，转到接缝处不会有一道硬边。
+                colors: Theme.marqueeColors + [Theme.marqueeColors[0]],
+                center: .center,
+                startAngle: .degrees(start),
+                endAngle: .degrees(start + 360)
             )
-            .rotationEffect(.degrees(progress * 360))
         }
     }
 }

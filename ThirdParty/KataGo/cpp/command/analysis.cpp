@@ -536,7 +536,9 @@ int MainCmds::analysis(const vector<string>& args) {
           nnEval->clearCache();
           if(humanEval != NULL)
             humanEval->clearCache();
-          evalCache->clear();
+          // 登登围棋改动：evalCache 只在开了 subtreeValueBias 时才建，没建时是空指针，原来直接 clear 会崩。
+          if(evalCache != nullptr)
+            evalCache->clear();
           pushToWrite(new string(input.dump()));
         }
         else if(action == "terminate") {
