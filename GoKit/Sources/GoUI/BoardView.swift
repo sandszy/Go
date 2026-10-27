@@ -92,8 +92,10 @@ public struct BoardView: View {
                     // 做题、对弈：边框一直在转，比固定颜色更难被忽略，不用再等切换瞬间的扫光提醒。
                     // allowsHitTesting(false)：这层是普通 View 不是 Shape，mask 只管画出来的样子，
                     // 不挡住底下棋盘的点击，不然棋盘会变得点不动。
+                    // 用 strokeBorder 往里描，和摆题的静态框一样粗细。stroke 是骑在边上描的，外面一半被棋盘边界切掉，
+                    // 直边只剩一半宽，圆角那段外半圈却还在边界里面，四个角就显得比直边粗一圈。
                     MarqueeFrame()
-                        .mask(shape.stroke(lineWidth: frameWidth))
+                        .mask(shape.strokeBorder(lineWidth: frameWidth))
                         .allowsHitTesting(false)
                 }
             }
@@ -101,7 +103,7 @@ public struct BoardView: View {
                 // 扫光只盖在画框这圈细线上，不盖住棋盘本身，不然会把棋子、网格线一起扫过，太抢戏。
                 if let flashColor {
                     ModeSwitchSweep(color: flashColor)
-                        .mask(shape.stroke(lineWidth: frameWidth))
+                        .mask(shape.strokeBorder(lineWidth: frameWidth))
                         .allowsHitTesting(false)
                 }
             }
