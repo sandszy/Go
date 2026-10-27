@@ -100,6 +100,34 @@ struct KataGoProtocolTests {
         #expect(transport.requests.last?["terminateId"] as? String == transport.requests.first?["id"] as? String)
     }
 
+    @Test("叫停：发 terminate_all，等着的请求以 interrupted 失败；下一个请求前先清缓存")
+    func interruptStopsAll() async throws {
+        // 这个假引擎什么都不回，请求一直等着，直到被叫停。
+        let transport = FakeTransport { _ in "{}" }
+        let engine = KataGoEngine(transport: transport)
+        let query = EngineQuery(board: Board(size: 19), firstPlayer: .black, komi: 6.5, maxVisits: 10)
+        let task = Task { try await engine.analyze(query) }
+        while transport.requests.isEmpty { await Task.yield() }
+        engine.interrupt()
+        let error = await #expect(throws: EngineError.self) { try await task.value }
+        guard case .interrupted? = error else { Issue.record("应该是被叫停：\(String(describing: error))"); return }
+        #expect(transport.requests.last?["action"] as? String == "terminate_all")
+
+        let next = Task { try await engine.analyze(query) }
+        while transport.requests.count < 4 { await Task.yield() }
+        #expect(transport.requests[2]["action"] as? String == "clear_cache")
+        #expect(transport.requests[3]["moves"] != nil)
+        engine.interrupt()
+        _ = try? await next.value
+        // 清过一次就不再清。
+        let third = Task { try await engine.analyze(query) }
+        while transport.requests.count < 7 { await Task.yield() }
+        #expect(transport.requests[5]["action"] as? String == "clear_cache")
+        #expect(transport.requests[6]["moves"] != nil)
+        engine.interrupt()
+        _ = try? await third.value
+    }
+
     @Test("引擎报错时请求失败")
     func error() async {
         let engine = KataGoEngine(transport: FakeTransport { request in
@@ -140,6 +168,28 @@ final class RecordingEngine: GoEngine, @unchecked Sendable {
             await Task.yield()
         }
         return nil
+    }
+}
+
+/// 每个局面第一次问都像 App 切到后台那样被叫停，第二次才回答。
+final class InterruptOnceEngine: GoEngine, @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: Set<[Point?]> = []
+    private var count = 0
+    private let answer: @Sendable (EngineQuery) -> EngineAnalysis
+
+    init(answer: @escaping @Sendable (EngineQuery) -> EngineAnalysis) { self.answer = answer }
+
+    var interrupted: Int { lock.withLock { count } }
+
+    func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis {
+        let first = lock.withLock {
+            guard seen.insert(query.moves).inserted else { return false }
+            count += 1
+            return true
+        }
+        if first { throw .interrupted }
+        return answer(query)
     }
 }
 
@@ -240,6 +290,21 @@ struct EngineSolverTests {
         let count = engine.queries.count
         _ = await solver.score([e2])
         #expect(engine.queries.count == count)
+    }
+
+    @Test("被叫停的局面不当成算不出来：用到时重新算一次")
+    func retryAfterInterrupt() async {
+        let e2 = e2, f1 = f1
+        let engine = InterruptOnceEngine { query in
+            switch query.moves {
+            case []: self.analysis(10, best: e2)
+            case [e2]: self.analysis(-10, best: f1)
+            default: self.analysis(0, best: nil)
+            }
+        }
+        let solver = EngineSolver(problem: .sample, engine: engine)
+        #expect(await solver.score([e2]) == .loss(0))
+        #expect(engine.interrupted == 3, "开头、E2 以后、找要分死活的子用的“停一手”三个局面各被叫停一次，都重算了")
     }
 
     @Test("白方的手也能打分，从白方来看")

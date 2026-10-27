@@ -197,6 +197,17 @@ public actor EngineSolver {
     private func analysis(_ moves: [Point?]) async throws -> EngineAnalysis {
         do {
             return try await task(for: moves).value
+        } catch EngineError.interrupted {
+            // App 离开前台时被叫停的，不是算不出来：回来用到时重新算一次。
+            // 等它的人也被取消了（离开前台时界面取消了正在做的），就不重算，免得在后台又算起来。
+            analyses[moves] = nil
+            if Task.isCancelled { throw EngineError.interrupted }
+            do {
+                return try await task(for: moves).value
+            } catch {
+                analyses[moves] = nil
+                throw error
+            }
         } catch {
             // 算失败的不留着，下次重新算。
             analyses[moves] = nil

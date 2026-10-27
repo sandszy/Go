@@ -51,9 +51,19 @@ struct DengDengGoApp: App {
         return context.makeImage()
     }
 
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
         WindowGroup {
             ProblemEditorView(model: editor)
+        }
+        // 不在前台就叫停 KataGo：iOS 不让后台的 App 用 GPU（技术架构 D21）。拉下控制中心时是 inactive，也停。
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                editor.returnToForeground()
+            } else {
+                editor.leaveForeground()
+            }
         }
     }
 }

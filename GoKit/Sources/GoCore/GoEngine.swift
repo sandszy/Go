@@ -84,6 +84,8 @@ public enum EngineError: Error, Sendable {
     case unavailable(String)
     /// 引擎回了看不懂的结果，或者报了错。
     case failed(String)
+    /// 被叫停了（App 离开前台），不是算不出来，回来再算一次。
+    case interrupted
 }
 
 /// 围棋引擎，比如 KataGo。
@@ -91,8 +93,11 @@ public protocol GoEngine: Sendable {
     /// 给家长看的名字，比如"KataGo（GPU）"。
     var name: String { get }
     func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis
+    /// 停下所有正在算的请求，等着的都以 `.interrupted` 失败。App 离开前台时调：iOS 不让后台的 App 用 GPU。
+    func interrupt()
 }
 
 extension GoEngine {
     public var name: String { "引擎" }
+    public func interrupt() {}
 }
