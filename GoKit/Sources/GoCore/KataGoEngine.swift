@@ -16,6 +16,8 @@ public final class KataGoEngine: GoEngine, @unchecked Sendable {
     private var nextID = 0
     private var waiting: [String: CheckedContinuation<EngineAnalysis, any Error>] = [:]
     private var sizes: [String: Int] = [:]
+    /// 叫停过，下一个请求前先清掉 KataGo 的缓存：后台被拒绝的 GPU 运算可能留下坏结果。
+    private var needsClearCache = false
 
     public init(transport: any KataGoTransport, name: String = "KataGo") {
         self.name = name
@@ -31,10 +33,13 @@ public final class KataGoEngine: GoEngine, @unchecked Sendable {
         do {
             return try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
-                    lock.withLock {
+                    let clear = lock.withLock {
                         waiting[id] = continuation
                         sizes[id] = query.board.size
+                        defer { needsClearCache = false }
+                        return needsClearCache
                     }
+                    if clear { transport.send(KataGoProtocol.clearCache()) }
                     transport.send(KataGoProtocol.request(id: id, query: query))
                 }
             } onCancel: { [transport] in
@@ -46,6 +51,16 @@ public final class KataGoEngine: GoEngine, @unchecked Sendable {
         } catch {
             throw .failed(error.localizedDescription)
         }
+    }
+
+    /// 让引擎停下所有请求。引擎随后还会回被停下的那些，对不上等着的就丢掉。
+    public func interrupt() {
+        let all = lock.withLock {
+            defer { waiting = [:]; sizes = [:]; needsClearCache = true }
+            return Array(waiting.values)
+        }
+        transport.send(KataGoProtocol.terminateAll())
+        for continuation in all { continuation.resume(throwing: EngineError.interrupted) }
     }
 
     private func receive(_ line: String) {
@@ -89,6 +104,14 @@ public enum KataGoProtocol {
         let object = ["id": "停-\(id)", "action": "terminate", "terminateId": id]
         let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
+    }
+
+    static func terminateAll() -> String {
+        #"{"action":"terminate_all","id":"全停"}"#
+    }
+
+    static func clearCache() -> String {
+        #"{"action":"clear_cache","id":"清缓存"}"#
     }
 
     static func request(id: String, query: EngineQuery) -> String {

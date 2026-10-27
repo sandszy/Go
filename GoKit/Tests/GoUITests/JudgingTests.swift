@@ -279,6 +279,62 @@ struct EngineJudgingTests {
         return model
     }
 
+    /// 叫停之前一直算不完的假引擎：请求都等着，叫停时以 interrupted 失败。叫停过以后和 SampleEngine 一样马上回答。
+    private final class StallingEngine: GoEngine, @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        private var stalled = true
+        private(set) var interrupts = 0
+        var pending: Int { lock.withLock { waiting.count } }
+
+        func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis {
+            var stopped = false
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let wait = lock.withLock {
+                    if stalled { waiting.append(continuation) }
+                    return stalled
+                }
+                if !wait { continuation.resume() } else { stopped = true }
+            }
+            // 等过的那个请求是被叫停的。
+            if stopped { throw .interrupted }
+            return try await SampleEngine().analyze(query)
+        }
+
+        func interrupt() {
+            let all = lock.withLock {
+                defer { waiting = []; stalled = false; interrupts += 1 }
+                return waiting
+            }
+            for continuation in all { continuation.resume() }
+        }
+    }
+
+    @Test("切出 App：正在算的停下、引擎被叫停，不留下“算不出来”；回来以后接着算，和没切出去一样")
+    func leaveAndReturn() async {
+        let engine = StallingEngine()
+        let model = ProblemEditorModel(problem: .sample, engine: engine)
+        model.replyDelay = .zero
+        model.confirmMoves = false
+        model.switchMode(to: .solve)
+        model.tap(Point(4, 17))
+        #expect(model.isThinking)
+        while engine.pending == 0 { await Task.yield() }
+
+        model.leaveForeground()
+        #expect(!model.isThinking)
+        #expect(engine.interrupts == 1)
+        #expect(model.message == nil)
+        #expect(model.tree.path.count == 2, "白棋还没应")
+        await model.waitUntilIdle()
+
+        model.returnToForeground()
+        #expect(model.isThinking)
+        await model.waitUntilIdle()
+        #expect(model.message == EditorMessage(text: "黑 E2：0 目。白棋应在 F1", tone: .success))
+        #expect(model.tree.path.count == 3)
+    }
+
     @Test("下到题目外面：不打分、提示可以悔棋，对方不应，后面自由下；悔掉再下又接着打分")
     func outsideArea() async {
         let model = solvingModel()

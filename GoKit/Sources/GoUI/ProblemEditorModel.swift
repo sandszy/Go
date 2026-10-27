@@ -232,6 +232,8 @@ public final class ProblemEditorModel {
     private var aiMoves: Set<Int> = []
     private var notes: [Int: EditorMessage] = [:]
     private var work: Task<Void, Never>?
+    /// App 不在前台。这时不往引擎发新的请求。
+    private var isInBackground = false
 
     /// engine 为 nil 时不打分，只能自己两边下；homework 为 nil 时不存题。
     public init(problem: Problem = .sample, engine: (any GoEngine)? = nil, homework: HomeworkStore? = nil) {
@@ -718,9 +720,24 @@ public final class ProblemEditorModel {
         resume()
     }
 
+    /// App 离开前台：iOS 不让后台的 App 用 GPU，正在算的停下，引擎里的请求也叫停（技术架构 D21）。
+    public func leaveForeground() {
+        guard !isInBackground else { return }
+        isInBackground = true
+        cancelWork()
+        engine?.interrupt()
+    }
+
+    /// 回到前台，从停下的那一手接着算：缺分数的补上分数，该 AI 应的接着应。
+    public func returnToForeground() {
+        guard isInBackground else { return }
+        isInBackground = false
+        resume()
+    }
+
     /// 最后一手是人下的，还缺分数或者缺 AI 的应手，就补上；对弈时轮到 AI 也让它下。否则轮到人下，先替下一手算着。
     private func resume() {
-        guard isUsingEngine, !isThinking, let judge else { return }
+        guard isUsingEngine, !isThinking, !isInBackground, let judge else { return }
         let node = tree.currentID
         if needsWork(node) {
             start(node)
