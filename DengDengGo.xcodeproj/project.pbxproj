@@ -44,7 +44,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		DD0000000000000000000070 /* Exceptions for "ThirdParty/KataGo/cpp" folder in "KataGo" target */ = {
+		DD0000000000000000000070 /* Exceptions for "KataGo C++" folder in "KataGo" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				neuralnet/eigenbackend.cpp,
@@ -68,7 +68,7 @@
 		DD0000000000000000000047 /* KataGo C++ */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				DD0000000000000000000070 /* Exceptions for "ThirdParty/KataGo/cpp" folder in "KataGo" target */,
+				DD0000000000000000000070 /* Exceptions for "KataGo C++" folder in "KataGo" target */,
 			);
 			name = "KataGo C++";
 			path = ThirdParty/KataGo/cpp;
@@ -462,6 +462,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "登登围棋";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				INFOPLIST_KEY_NSCameraUsageDescription = "拍下作业纸，把题目摆到棋盘上";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -502,6 +503,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "登登围棋";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				INFOPLIST_KEY_NSCameraUsageDescription = "拍下作业纸，把题目摆到棋盘上";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
