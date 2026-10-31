@@ -38,18 +38,18 @@ struct JudgingTests {
         let model = solvingModel()
         model.tap(e2)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 E2：0 目。白棋应在 F1", tone: .success))
+        #expect(model.message == EditorMessage(text: "👍 黑 E2：0 目。白棋应在 F1", tone: .success))
         #expect(model.tree.path.count == 3)
         #expect(model.position.toPlay == .black)
         #expect(!model.isThinking)
     }
 
-    @Test("亏得多：分数橙色，不说对错，白棋应出破解的一手")
+    @Test("亏得多：分数红色，不说对错，白棋应出破解的一手")
     func scoresBadMove() async {
         let model = solvingModel()
         model.tap(d2)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 D2：−15 目。白棋应在 E2", tone: .warning))
+        #expect(model.message == EditorMessage(text: "😢 黑 D2：−15 目。白棋应在 E2", tone: .danger))
         #expect(model.lastMove == e2)
         #expect(model.position.toPlay == .black)
     }
@@ -65,7 +65,7 @@ struct JudgingTests {
             let p = area.points.first { model.position.isLegal($0) }!
             model.tap(p)
             await model.waitUntilIdle()
-            #expect(model.message?.text.hasPrefix("黑 \(Coordinates.name(of: p, size: 19))：") == true)
+            #expect(model.message?.text.hasPrefix("👍 黑 \(Coordinates.name(of: p, size: 19))：") == true)
             #expect(model.tree.path.count == 3 + 2 * round)
             #expect(model.position.toPlay == .black)
         }
@@ -79,7 +79,7 @@ struct JudgingTests {
         model.tap(Point(1, 17))
         await model.waitUntilIdle()
         let idle = try? #require(model.lastMove)
-        #expect(model.message?.text == "黑 B2：0 目。白棋没什么好下的了，走一步闲棋：\(idle.map { Coordinates.name(of: $0, size: 19) } ?? "")")
+        #expect(model.message?.text == "👍 黑 B2：0 目。白棋没什么好下的了，走一步闲棋：\(idle.map { Coordinates.name(of: $0, size: 19) } ?? "")")
         #expect(model.position.toPlay == .black)
     }
 
@@ -89,7 +89,7 @@ struct JudgingTests {
         model.autoReply = false
         model.tap(d2)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 D2：−15 目", tone: .warning))
+        #expect(model.message == EditorMessage(text: "😢 黑 D2：−15 目", tone: .danger))
         #expect(model.tree.path.count == 2)
         #expect(model.position.toPlay == .white)
     }
@@ -110,7 +110,7 @@ struct JudgingTests {
         #expect(model.message == nil)
         model.autoScore = true
         await model.waitUntilIdle()
-        #expect(model.message?.text == "黑 E2：0 目")
+        #expect(model.message?.text == "👍 黑 E2：0 目")
         #expect(model.tree.path.count == 2)
     }
 
@@ -122,11 +122,11 @@ struct JudgingTests {
         await model.waitUntilIdle()
         #expect(model.tree.path.count == 2)
         #expect(model.position.toPlay == .white)
-        #expect(model.message?.text == "黑 E2：0 目")
+        #expect(model.message?.text == "👍 黑 E2：0 目")
 
         model.autoReply = true
         await model.waitUntilIdle()
-        #expect(model.message?.text == "黑 E2：0 目。白棋应在 F1")
+        #expect(model.message?.text == "👍 黑 E2：0 目。白棋应在 F1")
         #expect(model.tree.path.count == 3)
         #expect(model.position.toPlay == .black)
     }
@@ -140,7 +140,7 @@ struct JudgingTests {
         await model.waitUntilIdle()
         #expect(!model.isThinking)
         #expect(model.tree.path.count == 2)
-        #expect(model.message?.text == "黑 E2：0 目")
+        #expect(model.message?.text == "👍 黑 E2：0 目")
     }
 
     @Test("悔棋连同白棋的应手一起退回，再下还能打分")
@@ -172,7 +172,7 @@ struct JudgingTests {
 
         let first = try #require(choices.first)
         model.selectVariation(first.id)
-        #expect(model.message?.text == "黑 D2：−15 目。白棋应在 E2")
+        #expect(model.message?.text == "😢 黑 D2：−15 目。白棋应在 E2")
         #expect(model.position.toPlay == .black)
 
         model.undo()
@@ -217,7 +217,7 @@ struct JudgingTests {
         let model = solvingModel(Problem(setup: board))
         model.tap(Point(3, 18))
         await model.waitUntilIdle()
-        #expect(model.message?.text.hasPrefix("黑 D1：−10 目，提掉 1 个子。白棋没什么好下的了，走一步闲棋：") == true)
+        #expect(model.message?.text.hasPrefix("😢 黑 D1：−10 目，提掉 1 个子。白棋没什么好下的了，走一步闲棋：") == true)
     }
 
     @Test("分数的写法：负数、一位小数，不到 0.05 目写 0")
@@ -227,6 +227,18 @@ struct JudgingTests {
         #expect(ProblemEditorModel.scoreText(2.34) == "−2.3 目")
         #expect(ProblemEditorModel.scoreText(14.5) == "−14.5 目")
         #expect(ProblemEditorModel.scoreText(15) == "−15 目")
+    }
+
+    @Test("分数分三档：亏 1.5 目以内绿 👍，5 目以内橙 🙂，再多红 😢")
+    func scoreTiers() {
+        func note(_ loss: Double) -> EditorMessage {
+            ProblemEditorModel.note(mover: .black, point: d2, size: 19, score: .loss(loss), captured: 0, reply: nil)
+        }
+        #expect(note(0) == EditorMessage(text: "👍 黑 D2：0 目", tone: .success))
+        #expect(note(1.5) == EditorMessage(text: "👍 黑 D2：−1.5 目", tone: .success))
+        #expect(note(3) == EditorMessage(text: "🙂 黑 D2：−3 目", tone: .warning))
+        #expect(note(5) == EditorMessage(text: "🙂 黑 D2：−5 目", tone: .warning))
+        #expect(note(5.1) == EditorMessage(text: "😢 黑 D2：−5.1 目", tone: .danger))
     }
 
     @Test("没有引擎：不打分，两个开关都用不了，自己两边下")
@@ -261,14 +273,14 @@ struct EngineJudgingTests {
         func analyze(_ query: EngineQuery) async throws(EngineError) -> EngineAnalysis { throw .unavailable("测试") }
     }
 
-    @Test("打分说明里有引擎的名字；空棋盘不打分")
+    @Test("打分说明里有引擎的名字；空棋盘不打分，也不显示说明")
     func summaryNamesEngine() {
         let model = ProblemEditorModel(problem: .sample, engine: NamedEngine())
         #expect(model.canJudge)
         #expect(model.judgeSummary == "打分：KataGo（CPU） 算每一手比最好的下法亏几目")
         let empty = ProblemEditorModel(problem: Problem(), engine: NamedEngine())
         #expect(!empty.canJudge)
-        #expect(empty.judgeSummary == "摆好题目后，做题时给每一手打分")
+        #expect(empty.judgeSummary.isEmpty)
     }
 
     private func solvingModel(_ problem: Problem = .sample) -> ProblemEditorModel {
@@ -331,7 +343,7 @@ struct EngineJudgingTests {
         model.returnToForeground()
         #expect(model.isThinking)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 E2：0 目。白棋应在 F1", tone: .success))
+        #expect(model.message == EditorMessage(text: "👍 黑 E2：0 目。白棋应在 F1", tone: .success))
         #expect(model.tree.path.count == 3)
     }
 
@@ -451,7 +463,7 @@ struct EngineJudgingTests {
         model.autoReply = true
         await model.waitUntilIdle()
 
-        #expect(model.message?.text == "白 D2：0 目。黑棋应在 C2")
+        #expect(model.message?.text == "👍 白 D2：0 目。黑棋应在 C2")
         #expect(model.tree.path.count == 4)
         #expect(model.lastMove == Point(2, 17))
         #expect(model.position.toPlay == .white)

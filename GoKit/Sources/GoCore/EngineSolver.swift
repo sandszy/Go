@@ -46,8 +46,10 @@ public actor EngineSolver {
     /// 题目要分死活的子，第一手以后只在它们旁边搜索。
     private var keyStones: Set<Point>?
 
-    /// 亏这么多目以内，界面上分数用绿色，超过用橙色。外框让死活的差别至少有好几目，吃一个子也有两目。
+    /// 亏这么多目以内，界面上分数用绿色，超过用橙色（再超过 `largeLoss` 用红色）。外框让死活的差别至少有好几目，吃一个子也有两目。
     public static let tolerance = 1.5
+    /// 亏超过这么多目，界面上分数用红色；1.5 到 5 目之间用橙色。
+    public static let largeLoss = 5.0
     /// 做题方先下和停一手相比，归属变化超过这个值的子，就是题目要分死活的子。
     static let contested = 0.6
     /// 轮到人下时，猜会下引擎最想下的这几手，提前算好。

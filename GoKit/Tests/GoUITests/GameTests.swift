@@ -96,7 +96,7 @@ struct GameTests {
         #expect(!model.isThinking)
         model.switchMode(to: .play)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 E5：0 目。白棋应在 C7", tone: .success))
+        #expect(model.message == EditorMessage(text: "👍 黑 E5：0 目。白棋应在 C7", tone: .success))
         #expect(model.lastMove == c7)
     }
 
@@ -165,10 +165,10 @@ struct GameTests {
         let model = gameModel()
         model.tap(a9)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 A9：−3 目。白棋应在 E5", tone: .warning))
+        #expect(model.message == EditorMessage(text: "🙂 黑 A9：−3 目。白棋应在 E5", tone: .warning))
         model.tap(c7)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 C7：0 目。白棋应在 G3", tone: .success))
+        #expect(model.message == EditorMessage(text: "👍 黑 C7：0 目。白棋应在 G3", tone: .success))
     }
 
     @Test("关掉 AI 陪下就是两个人轮流下，两边都打分")
@@ -177,10 +177,10 @@ struct GameTests {
         model.autoReply = false
         model.tap(e5)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 E5：0 目", tone: .success))
+        #expect(model.message == EditorMessage(text: "👍 黑 E5：0 目", tone: .success))
         model.tap(c7)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "白 C7：0 目", tone: .success))
+        #expect(model.message == EditorMessage(text: "👍 白 C7：0 目", tone: .success))
         #expect(model.position.toPlay == .black)
     }
 
@@ -189,7 +189,7 @@ struct GameTests {
         let model = gameModel(engine: GameEngine(passes: true))
         model.tap(e5)
         await model.waitUntilIdle()
-        #expect(model.message == EditorMessage(text: "黑 E5：0 目。白棋停一手，觉得没地方下了。可以点“结束，数子”", tone: .success))
+        #expect(model.message == EditorMessage(text: "👍 黑 E5：0 目。白棋停一手，觉得没地方下了。可以点“结束，数子”", tone: .success))
         #expect(model.lastMove == nil)
         #expect(model.position.toPlay == .black)
     }

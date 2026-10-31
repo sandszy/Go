@@ -47,7 +47,7 @@ struct ToolIcon: View {
     }
 }
 
-/// 面板顶上的提示条：答对绿色，下错橙色，其他蓝色。
+/// 面板顶上的提示条：亏得少绿色，亏一些橙色，亏得多红色，其他蓝色。
 struct MessageBanner: View {
     let message: EditorMessage
 
@@ -55,6 +55,7 @@ struct MessageBanner: View {
         switch message.tone {
         case .success: .green
         case .warning: .orange
+        case .danger: .red
         case .info: .blue
         }
     }

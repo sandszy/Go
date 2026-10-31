@@ -20,3 +20,7 @@ Samples/
 
 # KataGo 模型太大，用 Scripts/fetch-katago-model.sh 下载
 *.bin.gz
+
+# Claude Code 的本地设置和会话 worktree，不进仓库
+.claude/settings.local.json
+.claude/worktrees/

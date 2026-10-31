@@ -76,6 +76,7 @@ public struct EditorMessage: Equatable, Sendable {
         case info
         case success
         case warning
+        case danger
     }
 
     public var text: String
@@ -310,7 +311,7 @@ public final class ProblemEditorModel {
     /// 告诉家长用什么打分。
     public var judgeSummary: String {
         guard let engine else { return "没有引擎，不能打分，只能自己两边下" }
-        return problem.setup.isEmpty ? "摆好题目后，做题时给每一手打分" : "打分：\(engine.name) 算每一手比最好的下法亏几目"
+        return problem.setup.isEmpty ? "" : "打分：\(engine.name) 算每一手比最好的下法亏几目"
     }
 
     /// 当前这一步可以切换的变化。AI 陪下时以人下的那一手为准，AI 的应手跟着走。
@@ -947,8 +948,11 @@ public final class ProblemEditorModel {
         var tone = EditorMessage.Tone.info
         if case let .loss(loss)? = score, let mover {
             let name = point.map { Coordinates.name(of: $0, size: size) } ?? "停一手"
-            head = "\(mover.name) \(name)：\(scoreText(loss))"
-            tone = loss <= EngineSolver.tolerance ? .success : .warning
+            let (emoji, tier): (String, EditorMessage.Tone) = loss <= EngineSolver.tolerance
+                ? ("👍", .success)
+                : loss <= EngineSolver.largeLoss ? ("🙂", .warning) : ("😢", .danger)
+            head = "\(emoji) \(mover.name) \(name)：\(scoreText(loss))"
+            tone = tier
         }
         if captured > 0 {
             head += head.isEmpty ? "提掉 \(captured) 个子" : "，提掉 \(captured) 个子"

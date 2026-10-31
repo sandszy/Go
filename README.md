@@ -52,7 +52,7 @@ xcrun devicectl device process launch --device <iPad 的 UDID> --console --termi
    ```
 
 2. 打开 `DengDengGo.xcodeproj`，在 Signing & Capabilities 里选你的开发者团队。Bundle ID 暂时是 `com.sandszy.dengdenggo`，可以改。
-3. 选一个 iPad 模拟器，运行。
+3. 选 iPhone Duo 模拟器，运行。
 
 ## 测试
 
@@ -68,10 +68,10 @@ cd GoKit && swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/Command
 
 识别测试有两部分：一部分用程序画的棋谱图，随时能跑；另一部分读真实的作业照片。照片是孩子的作业，不进仓库（见 `.gitignore`），放在仓库根目录的 `棋盘照片样例/` 或 `Samples/` 文件夹里时才会测：已知内容的几张逐子核对，其余的打印识别结果供人工对照。新拍的照片放进去就会跑。
 
-界面布局的 UI 测试（横屏、竖屏、提示位置）在 iPad 模拟器上跑，截图会存进测试结果：
+界面布局的 UI 测试（横屏、竖屏、提示位置）在 iPhone Duo 模拟器上跑，截图会存进测试结果。Duo 的系统不允许代码转屏，用这个脚本：它会打开 DeviceHub、转一次屏，横竖两个方向各跑一遍再汇总（终端需要辅助功能权限）。每次只验当前方向的那条布局，另一条跳过；横屏原图不用滚动是 iPad 的界面原则，手机上跳过：
 
 ```bash
-xcodebuild test -project DengDengGo.xcodeproj -scheme DengDengGo -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M4)'
+Scripts/ui-tests-duo.sh
 ```
 
 ## 渲染棋盘

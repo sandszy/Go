@@ -177,9 +177,11 @@ public struct ProblemEditorView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(model.judgeSummary)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            if !model.judgeSummary.isEmpty {
+                Text(model.judgeSummary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
             LabeledContent("棋盘") {
                 Picker("棋盘", selection: boardSizeBinding) {

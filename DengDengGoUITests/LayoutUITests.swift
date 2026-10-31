@@ -1,13 +1,15 @@
+import UIKit
 import XCTest
 
-/// 检查 iPad 横屏、竖屏时棋盘和面板的位置。截图作为附件保存在测试结果里。
+/// 检查横屏、竖屏时棋盘和面板的位置。截图作为附件保存在测试结果里。
+/// iPad 专用的界面原则（横屏原图不用滚动）在手机上跳过。
 final class LayoutUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
 
     @MainActor
-    func testLandscapePutsPanelBesideBoard() {
+    func testLandscapePutsPanelBesideBoard() throws {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面。直接摆上例题。
@@ -18,16 +20,21 @@ final class LayoutUITests: XCTestCase {
         let solveTab = app.buttons["做题"]
         XCTAssertTrue(board.waitForExistence(timeout: 5))
         XCTAssertTrue(solveTab.exists)
-        attachScreenshot(named: "横屏-摆题")
+
+        // iPhone Duo 上 XCUIDevice 转不动内屏，要先用 DeviceHub（⌘←/⌘→）把模拟器转到横屏再跑。
+        let window = app.windows.firstMatch.frame
+        try XCTSkipIf(window.height > window.width, "模拟器现在是竖屏；横屏布局这条要先把模拟器转成横屏再跑")
+
+        attachScreenshot(of: app, named: "横屏-摆题")
         XCTAssertLessThanOrEqual(board.frame.maxX, solveTab.frame.minX, "横屏时面板应该在棋盘右边")
 
         solveTab.tap()
         XCTAssertTrue(app.staticTexts["轮到黑棋下"].waitForExistence(timeout: 2))
-        attachScreenshot(named: "横屏-做题")
+        attachScreenshot(of: app, named: "横屏-做题")
     }
 
     @MainActor
-    func testPortraitPutsPanelBelowBoard() {
+    func testPortraitPutsPanelBelowBoard() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         // 不用 KataGo：模拟器上它跑在 CPU 上，判一手要一分多钟；这里测的是界面。直接摆上例题。
@@ -37,8 +44,13 @@ final class LayoutUITests: XCTestCase {
         let board = boardElement(in: app)
         let solveTab = app.buttons["做题"]
         XCTAssertTrue(board.waitForExistence(timeout: 5))
+
+        // iPhone Duo 上 XCUIDevice 转不动内屏，要先用 DeviceHub（⌘←/⌘→）把模拟器转到竖屏再跑。
+        let window = app.windows.firstMatch.frame
+        try XCTSkipIf(window.width > window.height, "模拟器现在是横屏；竖屏布局这条要先把模拟器转成竖屏再跑")
+
         XCTAssertLessThanOrEqual(board.frame.maxY, solveTab.frame.minY, "竖屏时面板应该在棋盘下面")
-        attachScreenshot(named: "竖屏-摆题")
+        attachScreenshot(of: app, named: "竖屏-摆题")
     }
 
     /// 竖屏时面板要滚动，提示必须放在不用滚动就能看到的地方。
@@ -59,7 +71,7 @@ final class LayoutUITests: XCTestCase {
         let message = app.staticTexts["这里已经有棋子了"]
         XCTAssertTrue(message.waitForExistence(timeout: 2))
         XCTAssertTrue(message.isHittable, "提示应该不用滚动就能看到")
-        attachScreenshot(named: "竖屏-提示")
+        attachScreenshot(of: app, named: "竖屏-提示")
     }
 
     /// 第 7 题：下 E2（左数第 5 列、下数第 2 行），子落上去，轮到白棋。不用引擎时不打分，自己两边下。
@@ -80,7 +92,7 @@ final class LayoutUITests: XCTestCase {
         e2.tap()
 
         XCTAssertTrue(app.staticTexts["轮到白棋下"].waitForExistence(timeout: 5))
-        attachScreenshot(named: "横屏-下了一手")
+        attachScreenshot(of: app, named: "横屏-下了一手")
     }
 
     /// 对弈：9 路空棋盘，两个人各下一手，点“结束，数子”，提示里有数子结果。
@@ -107,13 +119,16 @@ final class LayoutUITests: XCTestCase {
         let result = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "数子：黑")).firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5))
         XCTAssertTrue(result.isHittable, "数子结果应该不用滚动就能看到")
-        attachScreenshot(named: "竖屏-对弈数子")
+        attachScreenshot(of: app, named: "竖屏-对弈数子")
     }
 
     /// 界面原则（技术架构第 8 节）：横屏时摆题面板上的原图一眼就能看到，不用往下滚动。
     /// 用最占地方的情况查：带原图、标着没拍全（“原图”那一行多了提示和“已经全了”），上面还有拿出题目的提示。
     @MainActor
-    func testReferenceImageVisibleInLandscape() {
+    func testReferenceImageVisibleInLandscape() throws {
+        // 这条是 iPad 的界面原则：手机横屏只有 600 多点高，放不下整张原图，不是它要管的情况。
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "手机横屏高度不够，原图不滚动是 iPad 的界面原则")
+
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         app.launchArguments = ["-katagoHardware", "off", "-samplePhotoProblem"]
@@ -123,7 +138,7 @@ final class LayoutUITests: XCTestCase {
         let complete = app.buttons["已经全了"]
         XCTAssertTrue(photo.waitForExistence(timeout: 5))
         XCTAssertTrue(complete.exists)
-        attachScreenshot(named: "横屏-原图")
+        attachScreenshot(of: app, named: "横屏-原图")
         let screen = app.windows.firstMatch.frame
         XCTAssertLessThanOrEqual(photo.frame.maxY, screen.maxY, "原图要整个在屏幕里，不用往下滚")
         XCTAssertTrue(photo.isHittable)
@@ -136,14 +151,16 @@ final class LayoutUITests: XCTestCase {
 
     @MainActor
     private func boardElement(in app: XCUIApplication) -> XCUIElement {
+        // 面板里也有个“棋盘”选择器，用棋盘的无障碍标签里的逗号把它区分开。
         app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH %@", "棋盘"))
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "棋盘，"))
             .firstMatch
     }
 
+    /// 抓 App 自己的窗口：iPhone Duo 有内外两块屏，XCUIScreen 抓到的是另一块，整张是黑的。
     @MainActor
-    private func attachScreenshot(named name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    private func attachScreenshot(of app: XCUIApplication, named name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
